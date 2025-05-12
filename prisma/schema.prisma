@@ -1,0 +1,100 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Modelo de usuário (vendedor ou admin)
+model User {
+  id          Int       @id @default(autoincrement())
+  email       String    @unique
+  password    String
+  name        String
+  role        Role      @default(SELLER)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  students    Student[] // Relação com alunos cadastrados pelo usuário
+}
+
+// Enum para tipos de usuário
+enum Role {
+  ADMIN
+  SELLER
+}
+
+// Tabela de domínio para modalidades de curso (Formação/Atualização)
+model CourseModality {
+  id          Int       @id @default(autoincrement())
+  code        String    @unique
+  name        String
+  description String?
+  courses     Course[]  // Relação com cursos desta modalidade
+  students    Student[] // Relação com alunos desta modalidade
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// Tabela de domínio para Tipo de Curso
+model CourseType {
+  id          Int       @id @default(autoincrement())
+  code        String    @unique
+  name        String
+  description String?
+  courses     Course[]  // Relação com cursos deste tipo
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// Tabela de domínio para Curso
+model Course {
+  id              Int            @id @default(autoincrement())
+  code            String         @unique
+  name            String
+  description     String?
+  courseType      CourseType     @relation(fields: [courseTypeId], references: [id])
+  courseTypeId    Int
+  courseModality  CourseModality @relation(fields: [courseModalityId], references: [id])
+  courseModalityId Int
+  students        Student[]      // Relação com alunos que fizeram este curso
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+// Modelo de aluno/cliente
+model Student {
+  id                        Int             @id @default(autoincrement())
+  registrationDate          DateTime        @default(now())
+  fullName                  String
+  ddd                       String          @db.VarChar(3)
+  phone                     String
+  email                     String?
+  birthDate                 DateTime?
+  cpf                       String          @unique
+  cnhNumber                 String?
+  cnhType                   String?
+  renach                    String?
+  course                    Course          @relation(fields: [courseId], references: [id])
+  courseId                  Int
+  courseModality            CourseModality  @relation(fields: [courseModalityId], references: [id])
+  courseModalityId          Int
+  value                     Float
+  paymentType               String          // Ex: Cartão, Pix, Dinheiro
+  installments              Int             @default(1)
+  paymentStatus             String          // Ex: Pago, Pendente
+  paymentDate               DateTime?       // Data da transação do pagamento
+  paymentForecastDate       DateTime?       // Data de previsão de pagamento
+  createdAt                 DateTime        @default(now())
+  updatedAt                 DateTime        @updatedAt
+  createdBy                 User            @relation(fields: [userId], references: [id])
+  userId                    Int
+}
+
+// Outros modelos que poderão ser adicionados no futuro:
+// - PaymentLink
+// - PaymentTransaction 
