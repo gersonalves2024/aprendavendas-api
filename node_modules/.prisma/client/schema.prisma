@@ -10,12 +10,14 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Modelo de usuário (vendedor ou admin)
+// Modelo de usuário (vendedor, afiliado ou admin)
 model User {
   id          Int       @id @default(autoincrement())
   email       String    @unique
   password    String
   name        String
+  ddd         String?   @db.VarChar(3)  // Código de área
+  phone       String?   // Número do telefone
   role        Role      @default(SELLER)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -26,6 +28,7 @@ model User {
 enum Role {
   ADMIN
   SELLER
+  AFFILIATE  // Perfil de afiliado
 }
 
 // Tabela de domínio para modalidades de curso (Formação/Atualização)
