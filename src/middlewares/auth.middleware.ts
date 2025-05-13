@@ -74,6 +74,37 @@ export const requireAdmin = (req: Request, res: Response, next: NextFunction): R
 };
 
 /**
+ * Middleware para verificar se o usuário tem um dos perfis permitidos
+ */
+export const requireProfile = (allowedProfiles: Role[]) => {
+  return (req: Request, res: Response, next: NextFunction): Response | undefined => {
+    try {
+      // Primeiro verifica se o usuário está autenticado
+      if (!req.user) {
+        throw new AppError('Usuário não autenticado. Por favor, faça login para continuar.', 401, undefined, 'AUTH_REQUIRED');
+      }
+      
+      // Administradores têm acesso a todos os recursos
+      if (req.user.role === Role.ADMIN) {
+        next();
+        return undefined;
+      }
+      
+      // Verifica se o perfil do usuário está entre os permitidos
+      if (!allowedProfiles.includes(req.user.role)) {
+        throw new AppError('Seu perfil não tem permissão para acessar este recurso.', 403, undefined, 'PROFILE_NOT_ALLOWED');
+      }
+      
+      // Continua para o próximo middleware ou controlador
+      next();
+      return undefined;
+    } catch (error) {
+      return handleError(error, res);
+    }
+  };
+};
+
+/**
  * Middleware para verificar se o usuário tem permissões de acesso a um recurso específico
  * (usado para permitir que vendedores acessem apenas seus próprios recursos)
  */

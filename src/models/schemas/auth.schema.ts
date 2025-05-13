@@ -13,6 +13,20 @@ import { Role } from '../user.model';
 export const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,}$/;
 
 /**
+ * Regex para validação de DDD
+ * Formato válido: 2 dígitos
+ */
+export const DDD_REGEX = /^\d{2}$/;
+
+/**
+ * Regex para validação de número de telefone
+ * Formatos válidos:
+ * - 8 ou 9 dígitos (sem DDD)
+ * - 10 ou 11 dígitos (com DDD)
+ */
+export const PHONE_REGEX = /^\d{8,11}$/;
+
+/**
  * Schema para registro de usuário
  */
 export const registerSchema = z.object({
@@ -33,7 +47,19 @@ export const registerSchema = z.object({
       message: 'Nome deve conter apenas letras e espaços' 
     }),
   
-  role: z.enum([Role.ADMIN, Role.SELLER])
+  ddd: z.string()
+    .optional()
+    .refine(value => !value || DDD_REGEX.test(value), {
+      message: 'DDD deve conter 2 dígitos'
+    }),
+  
+  phone: z.string()
+    .optional()
+    .refine(value => !value || PHONE_REGEX.test(value), {
+      message: 'Telefone deve conter 8, 9, 10 ou 11 dígitos'
+    }),
+  
+  role: z.enum([Role.ADMIN, Role.SELLER, Role.AFFILIATE])
     .optional()
     .default(Role.SELLER)
 });

@@ -17,7 +17,7 @@ export const register = async (req: Request, res: Response): Promise<Response> =
   try {
     // A validação já foi feita pelo middleware
     const userData = req.body as CreateUserInput;
-    const { email, password, name, role = Role.SELLER } = userData;
+    const { email, password, name, ddd, phone, role = Role.SELLER } = userData;
     
     // Verifica se o usuário está autenticado para criar novos administradores
     if (role === Role.ADMIN && (!req.user || req.user.role !== Role.ADMIN)) {
@@ -42,6 +42,8 @@ export const register = async (req: Request, res: Response): Promise<Response> =
         email,
         password: hashedPassword,
         name,
+        ddd,
+        phone,
         role
       }
     });
@@ -51,6 +53,8 @@ export const register = async (req: Request, res: Response): Promise<Response> =
       id: newUser.id,
       email: newUser.email,
       name: newUser.name,
+      ddd: newUser.ddd ?? undefined,
+      phone: newUser.phone ?? undefined,
       role: newUser.role as Role
     });
     
@@ -94,6 +98,8 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
       id: user.id,
       email: user.email,
       name: user.name,
+      ddd: user.ddd ?? undefined,
+      phone: user.phone ?? undefined,
       role: user.role as Role
     });
     
@@ -103,6 +109,8 @@ export const login = async (req: Request, res: Response): Promise<Response> => {
         id: user.id,
         email: user.email,
         name: user.name,
+        ddd: user.ddd,
+        phone: user.phone,
         role: user.role
       },
       ...authResponse
@@ -142,6 +150,8 @@ export const refreshToken = async (req: Request, res: Response): Promise<Respons
       id: user.id,
       email: user.email,
       name: user.name,
+      ddd: user.ddd ?? undefined,
+      phone: user.phone ?? undefined,
       role: user.role as Role
     });
     
@@ -165,6 +175,221 @@ export const logout = async (_req: Request, res: Response): Promise<Response> =>
       message: 'Logout realizado com sucesso',
       details: 'Para completar o logout, remova os tokens armazenados no cliente.'
     });
+  } catch (error) {
+    return handleError(error, res);
+  }
+};
+
+/**
+ * Lista usuários por perfil (role)
+ */
+export const listUsersByRole = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const { role } = req.query;
+    
+    // Verificar se o usuário é administrador
+    if (req.user?.role !== Role.ADMIN) {
+      throw new AppError('Acesso negado. Apenas administradores podem listar usuários.', 403, undefined, 'PERMISSION_DENIED');
+    }
+    
+    // Validar o role fornecido
+    if (role && !Object.values(Role).includes(role as Role)) {
+      throw new AppError('Tipo de perfil inválido.', 400, 'role', 'INVALID_ROLE');
+    }
+    
+    // Definir as condições de busca
+    const where: Prisma.UserWhereInput = {};
+    
+    if (role) {
+      where.role = role as Role;
+    }
+    
+    // Buscar usuários com as condições definidas
+    const users = await prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        ddd: true,
+        phone: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true
+      },
+      orderBy: {
+        name: 'asc'
+      }
+    });
+    
+    return res.status(200).json(users);
+    
+  } catch (error) {
+    return handleError(error, res);
+  }
+};
+
+/**
+ * Remove um usuário
+ */
+export const deleteUser = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const { id } = req.params;
+    
+    // Verificar se o usuário é administrador
+    if (req.user?.role !== Role.ADMIN) {
+      throw new AppError('Acesso negado. Apenas administradores podem excluir usuários.', 403, undefined, 'PERMISSION_DENIED');
+    }
+    
+    // Converter o id para número
+    const userId = Number.parseInt(id, 10);
+    
+    if (Number.isNaN(userId)) {
+      throw new AppError('ID de usuário inválido.', 400, 'id', 'INVALID_ID');
+    }
+    
+    // Verificar se o usuário existe
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+    
+    if (!user) {
+      throw new AppError('Usuário não encontrado.', 404, 'id', 'USER_NOT_FOUND');
+    }
+    
+    // Remover o usuário
+    await prisma.user.delete({
+      where: { id: userId }
+    });
+    
+    return res.status(200).json({ 
+      message: 'Usuário removido com sucesso.'
+    });
+    
+  } catch (error) {
+    return handleError(error, res);
+  }
+};
+
+/**
+ * Obtém detalhes de um usuário específico
+ */
+export const getUserById = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const { id } = req.params;
+    
+    // Verificar se o usuário é administrador
+    if (req.user?.role !== Role.ADMIN) {
+      throw new AppError('Acesso negado. Apenas administradores podem visualizar detalhes de usuários.', 403, undefined, 'PERMISSION_DENIED');
+    }
+    
+    // Converter o id para número
+    const userId = Number.parseInt(id, 10);
+    
+    if (Number.isNaN(userId)) {
+      throw new AppError('ID de usuário inválido.', 400, 'id', 'INVALID_ID');
+    }
+    
+    // Buscar o usuário
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        ddd: true,
+        phone: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+    
+    if (!user) {
+      throw new AppError('Usuário não encontrado.', 404, 'id', 'USER_NOT_FOUND');
+    }
+    
+    return res.status(200).json(user);
+    
+  } catch (error) {
+    return handleError(error, res);
+  }
+};
+
+/**
+ * Atualiza um usuário
+ */
+export const updateUser = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const { id } = req.params;
+    const { name, email, ddd, phone, password } = req.body;
+    
+    // Verificar se o usuário é administrador
+    if (req.user?.role !== Role.ADMIN) {
+      throw new AppError('Acesso negado. Apenas administradores podem atualizar usuários.', 403, undefined, 'PERMISSION_DENIED');
+    }
+    
+    // Converter o id para número
+    const userId = Number.parseInt(id, 10);
+    
+    if (Number.isNaN(userId)) {
+      throw new AppError('ID de usuário inválido.', 400, 'id', 'INVALID_ID');
+    }
+    
+    // Verificar se o usuário existe
+    const existingUser = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+    
+    if (!existingUser) {
+      throw new AppError('Usuário não encontrado.', 404, 'id', 'USER_NOT_FOUND');
+    }
+    
+    // Verificar se o email já está em uso por outro usuário
+    if (email && email !== existingUser.email) {
+      const emailExists = await prisma.user.findUnique({
+        where: { email }
+      });
+      
+      if (emailExists) {
+        throw new AppError('Este email já está em uso por outro usuário.', 409, 'email', 'DUPLICATE_EMAIL');
+      }
+    }
+    
+    // Preparar os dados para atualização
+    const updateData: Prisma.UserUpdateInput = {};
+    
+    if (name) updateData.name = name;
+    if (email) updateData.email = email;
+    if (ddd !== undefined) updateData.ddd = ddd;
+    if (phone !== undefined) updateData.phone = phone;
+    
+    // Se foi fornecida uma nova senha, fazer o hash
+    if (password) {
+      updateData.password = await hashPassword(password);
+    }
+    
+    // Atualizar o usuário
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        ddd: true,
+        phone: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+    
+    return res.status(200).json({
+      message: 'Usuário atualizado com sucesso.',
+      user: updatedUser
+    });
+    
   } catch (error) {
     return handleError(error, res);
   }

@@ -154,11 +154,15 @@ export const getStudents = async (req: Request, res: Response): Promise<Response
     // Prepara condições de busca usando o tipo correto do Prisma
     const where: Prisma.StudentWhereInput = {};
     
-    // Se for vendedor, só pode ver seus próprios alunos
+    // Filtrar alunos baseado no perfil do usuário
     if (req.user.role === 'SELLER') {
+      // Vendedor só pode ver seus próprios alunos
+      where.userId = req.user.userId;
+    } else if (req.user.role === 'AFFILIATE') {
+      // Afiliado só pode ver seus próprios alunos (registrados por ele)
       where.userId = req.user.userId;
     } else if (filters.userId) {
-      // Se for admin e especificou userId, filtra por esse vendedor
+      // Se for admin e especificou userId, filtra por esse usuário
       where.userId = Number(filters.userId);
     }
     
@@ -270,7 +274,7 @@ export const getStudentById = async (req: Request, res: Response): Promise<Respo
     }
     
     // Verifica se o usuário tem permissão para ver este aluno
-    if (req.user.role === 'SELLER' && student.userId !== req.user.userId) {
+    if ((req.user.role === 'SELLER' || req.user.role === 'AFFILIATE') && student.userId !== req.user.userId) {
       throw new AppError('Você não tem permissão para acessar este aluno', 403, undefined, 'PERMISSION_DENIED');
     }
     
@@ -298,6 +302,11 @@ export const updateStudent = async (req: Request, res: Response): Promise<Respon
     // Verifica se o usuário está autenticado
     if (!req.user) {
       throw new AppError('Você precisa estar autenticado para realizar esta operação', 401, undefined, 'AUTH_REQUIRED');
+    }
+    
+    // Verifica se o usuário tem permissão para editar (apenas ADMIN e SELLER)
+    if (req.user.role === 'AFFILIATE') {
+      throw new AppError('Afiliados não podem editar informações de alunos', 403, undefined, 'PERMISSION_DENIED');
     }
     
     // Busca o aluno
@@ -368,6 +377,11 @@ export const deleteStudent = async (req: Request, res: Response): Promise<Respon
       throw new AppError('Você precisa estar autenticado para realizar esta operação', 401, undefined, 'AUTH_REQUIRED');
     }
     
+    // Verifica se o usuário tem permissão para excluir (apenas ADMIN pode)
+    if (req.user.role !== 'ADMIN') {
+      throw new AppError('Apenas administradores podem excluir alunos', 403, undefined, 'ADMIN_REQUIRED');
+    }
+    
     // Verifica se o aluno existe
     const student = await prisma.student.findUnique({
       where: { id: Number.parseInt(id, 10) }
@@ -375,11 +389,6 @@ export const deleteStudent = async (req: Request, res: Response): Promise<Respon
     
     if (!student) {
       throw new AppError('Não foi possível encontrar um aluno com o ID especificado', 404, 'id', 'STUDENT_NOT_FOUND');
-    }
-    
-    // Verifica se o usuário tem permissão para excluir este aluno
-    if (req.user.role === 'SELLER' && student.userId !== req.user.userId) {
-      throw new AppError('Você não tem permissão para excluir este aluno', 403, undefined, 'PERMISSION_DENIED');
     }
     
     // Exclui o aluno

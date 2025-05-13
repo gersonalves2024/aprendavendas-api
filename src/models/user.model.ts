@@ -1,7 +1,8 @@
 // Enum para tipo de usuário
 export enum Role {
   ADMIN = 'ADMIN',
-  SELLER = 'SELLER'
+  SELLER = 'SELLER',
+  AFFILIATE = 'AFFILIATE'
 }
 
 // Interface para usuário
@@ -10,6 +11,8 @@ export interface User {
   email: string;
   password: string;
   name: string;
+  ddd?: string; // Código de área (opcional)
+  phone?: string; // Número do telefone (opcional)
   role: Role;
   createdAt: Date;
   updatedAt: Date;
@@ -20,6 +23,8 @@ export interface CreateUserInput {
   email: string;
   password: string;
   name: string;
+  ddd?: string; // Código de área (opcional)
+  phone?: string; // Número do telefone (opcional)
   role?: Role;
 }
 
@@ -34,6 +39,8 @@ export interface UserResponse {
   id: number;
   email: string;
   name: string;
+  ddd?: string; // Código de área (opcional)
+  phone?: string; // Número do telefone (opcional)
   role: Role;
   createdAt: Date;
   updatedAt: Date;

@@ -8,7 +8,8 @@ import {
 } from '../controllers/student.controller';
 import { 
   authenticate, 
-  requireAdmin 
+  requireAdmin,
+  requireProfile 
 } from '../middlewares/auth.middleware';
 import { 
   validate 
@@ -19,6 +20,7 @@ import {
   paginationSchema, 
   filtersSchema 
 } from '../models/schemas/student.schema';
+import { Role } from '../models/user.model';
 
 const router = Router();
 
@@ -26,10 +28,19 @@ const router = Router();
 router.use(authenticate);
 
 // Rotas para gerenciamento de alunos
-router.post('/', validate(createStudentSchema), createStudent);
+// Apenas vendedores podem criar alunos
+router.post('/', requireProfile([Role.SELLER]), validate(createStudentSchema), createStudent);
+
+// Vendedores e afiliados podem listar alunos (com filtragem por usuário no controller)
 router.get('/', validate(paginationSchema, 'query'), validate(filtersSchema, 'query'), getStudents);
+
+// Vendedores e afiliados podem ver detalhes de alunos (com verificação de propriedade no controller)
 router.get('/:id', getStudentById);
-router.put('/:id', validate(updateStudentSchema), updateStudent);
+
+// Apenas vendedores podem atualizar alunos
+router.put('/:id', requireProfile([Role.SELLER]), validate(updateStudentSchema), updateStudent);
+
+// Apenas administradores podem excluir alunos
 router.delete('/:id', requireAdmin, deleteStudent);
 
 export default router; 

@@ -17,6 +17,8 @@ export interface AuthResponse {
     id: number;
     email: string;
     name: string;
+    ddd?: string;
+    phone?: string;
     role: Role;
   };
 }
@@ -70,7 +72,14 @@ export const verifyRefreshToken = (token: string): TokenPayload | null => {
 /**
  * Gera tokens de autenticação e estrutura a resposta
  */
-export const generateAuthTokens = (user: { id: number; email: string; name: string; role: Role }): AuthResponse => {
+export const generateAuthTokens = (user: { 
+  id: number; 
+  email: string; 
+  name: string; 
+  ddd?: string;
+  phone?: string;
+  role: Role 
+}): AuthResponse => {
   const payload: TokenPayload = {
     userId: user.id,
     email: user.email,
@@ -87,6 +96,8 @@ export const generateAuthTokens = (user: { id: number; email: string; name: stri
       id: user.id,
       email: user.email,
       name: user.name,
+      ddd: user.ddd,
+      phone: user.phone,
       role: user.role
     }
   };
