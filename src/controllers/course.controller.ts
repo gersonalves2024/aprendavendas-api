@@ -2,30 +2,23 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { validateRequestBody } from '../utils/validation';
 import { z } from 'zod';
+import { generateUniqueCode } from '../utils/codeGenerator';
 
 const prisma = new PrismaClient();
 
 /**
  * Validadores usando Zod para garantir a integridade dos dados
  */
-const courseTypeSchema = z.object({
-  code: z.string().min(1, 'Código é obrigatório').max(20, 'Código deve ter no máximo 20 caracteres'),
-  name: z.string().min(3, 'Nome deve ter pelo menos 3 caracteres'),
-  description: z.string().optional(),
-});
-
 const courseModalitySchema = z.object({
-  code: z.string().min(1, 'Código é obrigatório').max(20, 'Código deve ter no máximo 20 caracteres'),
   name: z.string().min(3, 'Nome deve ter pelo menos 3 caracteres'),
   description: z.string().optional(),
 });
 
+// Modificamos o schema para aceitar múltiplas modalidades
 const courseSchema = z.object({
-  code: z.string().min(1, 'Código é obrigatório').max(20, 'Código deve ter no máximo 20 caracteres'),
   name: z.string().min(3, 'Nome deve ter pelo menos 3 caracteres'),
   description: z.string().optional(),
-  courseTypeId: z.number().int().positive('ID do tipo de curso deve ser um número positivo'),
-  courseModalityId: z.number().int().positive('ID da modalidade de curso deve ser um número positivo'),
+  modalityIds: z.array(z.number().int().positive('IDs das modalidades devem ser números positivos')),
 });
 
 /**
@@ -48,22 +41,37 @@ export const getAllCourseModalities = async (req: Request, res: Response) => {
  */
 export const getCourseModalityById = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const modalityId = parseInt(id, 10);
+  const modalityId = Number.parseInt(id, 10);
 
-  if (isNaN(modalityId)) {
+  if (Number.isNaN(modalityId)) {
     return res.status(400).json({ error: 'ID da modalidade de curso inválido' });
   }
 
   try {
     const courseModality = await prisma.courseModality.findUnique({
-      where: { id: modalityId }
+      where: { id: modalityId },
+      include: {
+        courseToModality: {
+          include: {
+            course: true
+          }
+        }
+      }
     });
 
     if (!courseModality) {
       return res.status(404).json({ error: 'Modalidade de curso não encontrada' });
     }
 
-    return res.status(200).json(courseModality);
+    // Transformar os dados para uma estrutura mais amigável para o frontend
+    // Em vez de deletar a propriedade, extraímos o que queremos e construímos um novo objeto
+    const { courseToModality, ...modalityData } = courseModality;
+    const formattedModality = {
+      ...modalityData,
+      courses: courseToModality.map(ctm => ctm.course)
+    };
+
+    return res.status(200).json(formattedModality);
   } catch (error) {
     console.error('Erro ao buscar modalidade de curso:', error);
     return res.status(500).json({ error: 'Erro ao buscar modalidade de curso' });
@@ -80,17 +88,14 @@ export const createCourseModality = async (req: Request, res: Response) => {
   }
 
   try {
-    // Verificar se já existe uma modalidade de curso com o mesmo código
-    const existingCourseModality = await prisma.courseModality.findUnique({
-      where: { code: req.body.code }
-    });
-
-    if (existingCourseModality) {
-      return res.status(400).json({ error: 'Já existe uma modalidade de curso com este código' });
-    }
-
+    // Gerar código único para a modalidade
+    const code = await generateUniqueCode("MOD");
+    
     const courseModality = await prisma.courseModality.create({
-      data: req.body
+      data: {
+        ...req.body,
+        code
+      }
     });
 
     return res.status(201).json(courseModality);
@@ -105,9 +110,9 @@ export const createCourseModality = async (req: Request, res: Response) => {
  */
 export const updateCourseModality = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const modalityId = parseInt(id, 10);
+  const modalityId = Number.parseInt(id, 10);
 
-  if (isNaN(modalityId)) {
+  if (Number.isNaN(modalityId)) {
     return res.status(400).json({ error: 'ID da modalidade de curso inválido' });
   }
 
@@ -124,17 +129,6 @@ export const updateCourseModality = async (req: Request, res: Response) => {
 
     if (!existingCourseModality) {
       return res.status(404).json({ error: 'Modalidade de curso não encontrada' });
-    }
-
-    // Verificar se já existe outra modalidade de curso com o mesmo código
-    if (req.body.code !== existingCourseModality.code) {
-      const codeExists = await prisma.courseModality.findUnique({
-        where: { code: req.body.code }
-      });
-
-      if (codeExists) {
-        return res.status(400).json({ error: 'Já existe uma modalidade de curso com este código' });
-      }
     }
 
     const courseModality = await prisma.courseModality.update({
@@ -154,9 +148,9 @@ export const updateCourseModality = async (req: Request, res: Response) => {
  */
 export const deleteCourseModality = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const modalityId = parseInt(id, 10);
+  const modalityId = Number.parseInt(id, 10);
 
-  if (isNaN(modalityId)) {
+  if (Number.isNaN(modalityId)) {
     return res.status(400).json({ error: 'ID da modalidade de curso inválido' });
   }
 
@@ -171,7 +165,7 @@ export const deleteCourseModality = async (req: Request, res: Response) => {
     }
 
     // Verificar se há cursos usando esta modalidade
-    const coursesUsingModality = await prisma.course.count({
+    const coursesUsingModality = await prisma.courseToModality.count({
       where: { courseModalityId: modalityId }
     });
 
@@ -204,194 +198,46 @@ export const deleteCourseModality = async (req: Request, res: Response) => {
 };
 
 /**
- * Obter todos os tipos de curso
- */
-export const getAllCourseTypes = async (req: Request, res: Response) => {
-  try {
-    const courseTypes = await prisma.courseType.findMany({
-      orderBy: { name: 'asc' }
-    });
-    return res.status(200).json(courseTypes);
-  } catch (error) {
-    console.error('Erro ao buscar tipos de curso:', error);
-    return res.status(500).json({ error: 'Erro ao buscar tipos de curso' });
-  }
-};
-
-/**
- * Obter um tipo de curso pelo ID
- */
-export const getCourseTypeById = async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const typeId = parseInt(id, 10);
-
-  if (isNaN(typeId)) {
-    return res.status(400).json({ error: 'ID do tipo de curso inválido' });
-  }
-
-  try {
-    const courseType = await prisma.courseType.findUnique({
-      where: { id: typeId }
-    });
-
-    if (!courseType) {
-      return res.status(404).json({ error: 'Tipo de curso não encontrado' });
-    }
-
-    return res.status(200).json(courseType);
-  } catch (error) {
-    console.error('Erro ao buscar tipo de curso:', error);
-    return res.status(500).json({ error: 'Erro ao buscar tipo de curso' });
-  }
-};
-
-/**
- * Criar um novo tipo de curso
- */
-export const createCourseType = async (req: Request, res: Response) => {
-  const validationResult = validateRequestBody(req.body, courseTypeSchema);
-  if (!validationResult.success) {
-    return res.status(400).json({ error: validationResult.error });
-  }
-
-  try {
-    // Verificar se já existe um tipo de curso com o mesmo código
-    const existingCourseType = await prisma.courseType.findUnique({
-      where: { code: req.body.code }
-    });
-
-    if (existingCourseType) {
-      return res.status(400).json({ error: 'Já existe um tipo de curso com este código' });
-    }
-
-    const courseType = await prisma.courseType.create({
-      data: req.body
-    });
-
-    return res.status(201).json(courseType);
-  } catch (error) {
-    console.error('Erro ao criar tipo de curso:', error);
-    return res.status(500).json({ error: 'Erro ao criar tipo de curso' });
-  }
-};
-
-/**
- * Atualizar um tipo de curso existente
- */
-export const updateCourseType = async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const typeId = parseInt(id, 10);
-
-  if (isNaN(typeId)) {
-    return res.status(400).json({ error: 'ID do tipo de curso inválido' });
-  }
-
-  const validationResult = validateRequestBody(req.body, courseTypeSchema);
-  if (!validationResult.success) {
-    return res.status(400).json({ error: validationResult.error });
-  }
-
-  try {
-    // Verificar se o tipo de curso existe
-    const existingCourseType = await prisma.courseType.findUnique({
-      where: { id: typeId }
-    });
-
-    if (!existingCourseType) {
-      return res.status(404).json({ error: 'Tipo de curso não encontrado' });
-    }
-
-    // Verificar se já existe outro tipo de curso com o mesmo código
-    if (req.body.code !== existingCourseType.code) {
-      const codeExists = await prisma.courseType.findUnique({
-        where: { code: req.body.code }
-      });
-
-      if (codeExists) {
-        return res.status(400).json({ error: 'Já existe um tipo de curso com este código' });
-      }
-    }
-
-    const courseType = await prisma.courseType.update({
-      where: { id: typeId },
-      data: req.body
-    });
-
-    return res.status(200).json(courseType);
-  } catch (error) {
-    console.error('Erro ao atualizar tipo de curso:', error);
-    return res.status(500).json({ error: 'Erro ao atualizar tipo de curso' });
-  }
-};
-
-/**
- * Excluir um tipo de curso
- */
-export const deleteCourseType = async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const typeId = parseInt(id, 10);
-
-  if (isNaN(typeId)) {
-    return res.status(400).json({ error: 'ID do tipo de curso inválido' });
-  }
-
-  try {
-    // Verificar se o tipo de curso existe
-    const existingCourseType = await prisma.courseType.findUnique({
-      where: { id: typeId }
-    });
-
-    if (!existingCourseType) {
-      return res.status(404).json({ error: 'Tipo de curso não encontrado' });
-    }
-
-    // Verificar se há cursos usando este tipo
-    const coursesUsingType = await prisma.course.count({
-      where: { courseTypeId: typeId }
-    });
-
-    if (coursesUsingType > 0) {
-      return res.status(400).json({ 
-        error: 'Não é possível excluir este tipo de curso pois existem cursos associados a ele' 
-      });
-    }
-
-    await prisma.courseType.delete({
-      where: { id: typeId }
-    });
-
-    return res.status(200).json({ message: 'Tipo de curso excluído com sucesso' });
-  } catch (error) {
-    console.error('Erro ao excluir tipo de curso:', error);
-    return res.status(500).json({ error: 'Erro ao excluir tipo de curso' });
-  }
-};
-
-/**
  * Obter todos os cursos
  */
 export const getAllCourses = async (req: Request, res: Response) => {
   try {
-    const { courseTypeId } = req.query;
-    let where = {};
+    const { courseModalityId } = req.query;
+    const where: Record<string, any> = {};
     
-    if (courseTypeId) {
-      const typeId = parseInt(courseTypeId as string, 10);
-      if (!isNaN(typeId)) {
-        where = { courseTypeId: typeId };
+    if (courseModalityId) {
+      const modalityId = Number.parseInt(courseModalityId as string, 10);
+      if (!Number.isNaN(modalityId)) {
+        where.courseToModality = {
+          some: {
+            courseModalityId: modalityId
+          }
+        };
       }
     }
 
     const courses = await prisma.course.findMany({
       where,
       include: { 
-        courseType: true,
-        courseModality: true 
+        courseToModality: {
+          include: {
+            courseModality: true
+          }
+        }
       },
       orderBy: { name: 'asc' }
     });
 
-    return res.status(200).json(courses);
+    // Transformar os dados para uma estrutura mais amigável para o frontend
+    const formattedCourses = courses.map(course => {
+      const { courseToModality, ...courseData } = course;
+      return {
+        ...courseData,
+        modalities: courseToModality.map(ctm => ctm.courseModality)
+      };
+    });
+
+    return res.status(200).json(formattedCourses);
   } catch (error) {
     console.error('Erro ao buscar cursos:', error);
     return res.status(500).json({ error: 'Erro ao buscar cursos' });
@@ -403,9 +249,9 @@ export const getAllCourses = async (req: Request, res: Response) => {
  */
 export const getCourseById = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const courseId = parseInt(id, 10);
+  const courseId = Number.parseInt(id, 10);
 
-  if (isNaN(courseId)) {
+  if (Number.isNaN(courseId)) {
     return res.status(400).json({ error: 'ID do curso inválido' });
   }
 
@@ -413,8 +259,11 @@ export const getCourseById = async (req: Request, res: Response) => {
     const course = await prisma.course.findUnique({
       where: { id: courseId },
       include: { 
-        courseType: true,
-        courseModality: true 
+        courseToModality: {
+          include: {
+            courseModality: true
+          }
+        }
       }
     });
 
@@ -422,7 +271,14 @@ export const getCourseById = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Curso não encontrado' });
     }
 
-    return res.status(200).json(course);
+    // Transformar os dados para uma estrutura mais amigável para o frontend
+    const { courseToModality, ...courseData } = course;
+    const formattedCourse = {
+      ...courseData,
+      modalities: courseToModality.map(ctm => ctm.courseModality)
+    };
+
+    return res.status(200).json(formattedCourse);
   } catch (error) {
     console.error('Erro ao buscar curso:', error);
     return res.status(500).json({ error: 'Erro ao buscar curso' });
@@ -438,43 +294,71 @@ export const createCourse = async (req: Request, res: Response) => {
     return res.status(400).json({ error: validationResult.error });
   }
 
+  const { name, description, modalityIds } = req.body;
+
   try {
-    // Verificar se já existe um curso com o mesmo código
-    const existingCourse = await prisma.course.findUnique({
-      where: { code: req.body.code }
-    });
-
-    if (existingCourse) {
-      return res.status(400).json({ error: 'Já existe um curso com este código' });
-    }
-
-    // Verificar se o tipo de curso existe
-    const courseType = await prisma.courseType.findUnique({
-      where: { id: req.body.courseTypeId }
-    });
-
-    if (!courseType) {
-      return res.status(400).json({ error: 'Tipo de curso não encontrado' });
-    }
+    // Gerar código único para o curso
+    const code = await generateUniqueCode("CRS");
     
-    // Verificar se a modalidade de curso existe
-    const courseModality = await prisma.courseModality.findUnique({
-      where: { id: req.body.courseModalityId }
-    });
-
-    if (!courseModality) {
-      return res.status(400).json({ error: 'Modalidade de curso não encontrada' });
-    }
-
-    const course = await prisma.course.create({
-      data: req.body,
-      include: { 
-        courseType: true,
-        courseModality: true 
+    // Verificar se todas as modalidades de curso existem
+    const modalitiesCount = await prisma.courseModality.count({
+      where: {
+        id: {
+          in: modalityIds
+        }
       }
     });
 
-    return res.status(201).json(course);
+    if (modalitiesCount !== modalityIds.length) {
+      return res.status(400).json({ error: 'Uma ou mais modalidades de curso não foram encontradas' });
+    }
+
+    // Criar o curso com o relacionamento muitos-para-muitos
+    const course = await prisma.$transaction(async (prisma) => {
+      // Criar o curso
+      const newCourse = await prisma.course.create({
+        data: {
+          code,
+          name,
+          description
+        }
+      });
+
+      // Criar os relacionamentos com as modalidades
+      for (const modalityId of modalityIds) {
+        await prisma.courseToModality.create({
+          data: {
+            courseId: newCourse.id,
+            courseModalityId: modalityId
+          }
+        });
+      }
+
+      // Buscar o curso completo com as modalidades
+      return prisma.course.findUnique({
+        where: { id: newCourse.id },
+        include: {
+          courseToModality: {
+            include: {
+              courseModality: true
+            }
+          }
+        }
+      });
+    });
+
+    // Transformar os dados para uma estrutura mais amigável para o frontend
+    if (course) {
+      const { courseToModality, ...courseData } = course;
+      const formattedCourse = {
+        ...courseData,
+        modalities: courseToModality.map(ctm => ctm.courseModality)
+      };
+
+      return res.status(201).json(formattedCourse);
+    }
+
+    return res.status(500).json({ error: 'Erro ao criar curso' });
   } catch (error) {
     console.error('Erro ao criar curso:', error);
     return res.status(500).json({ error: 'Erro ao criar curso' });
@@ -486,9 +370,9 @@ export const createCourse = async (req: Request, res: Response) => {
  */
 export const updateCourse = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const courseId = parseInt(id, 10);
+  const courseId = Number.parseInt(id, 10);
 
-  if (isNaN(courseId)) {
+  if (Number.isNaN(courseId)) {
     return res.status(400).json({ error: 'ID do curso inválido' });
   }
 
@@ -496,6 +380,8 @@ export const updateCourse = async (req: Request, res: Response) => {
   if (!validationResult.success) {
     return res.status(400).json({ error: validationResult.error });
   }
+
+  const { name, description, modalityIds } = req.body;
 
   try {
     // Verificar se o curso existe
@@ -507,45 +393,72 @@ export const updateCourse = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Curso não encontrado' });
     }
 
-    // Verificar se já existe outro curso com o mesmo código
-    if (req.body.code !== existingCourse.code) {
-      const codeExists = await prisma.course.findUnique({
-        where: { code: req.body.code }
+    // Verificar se todas as modalidades de curso existem
+    const modalitiesCount = await prisma.courseModality.count({
+      where: {
+        id: {
+          in: modalityIds
+        }
+      }
+    });
+
+    if (modalitiesCount !== modalityIds.length) {
+      return res.status(400).json({ error: 'Uma ou mais modalidades de curso não foram encontradas' });
+    }
+
+    // Atualizar o curso com o relacionamento muitos-para-muitos
+    const course = await prisma.$transaction(async (prisma) => {
+      // Atualizar o curso
+      const updatedCourse = await prisma.course.update({
+        where: { id: courseId },
+        data: {
+          name,
+          description
+        }
       });
 
-      if (codeExists) {
-        return res.status(400).json({ error: 'Já existe um curso com este código' });
+      // Remover todos os relacionamentos existentes
+      await prisma.courseToModality.deleteMany({
+        where: {
+          courseId
+        }
+      });
+
+      // Criar os novos relacionamentos
+      for (const modalityId of modalityIds) {
+        await prisma.courseToModality.create({
+          data: {
+            courseId,
+            courseModalityId: modalityId
+          }
+        });
       }
-    }
 
-    // Verificar se o tipo de curso existe
-    const courseType = await prisma.courseType.findUnique({
-      where: { id: req.body.courseTypeId }
+      // Buscar o curso atualizado com as modalidades
+      return prisma.course.findUnique({
+        where: { id: courseId },
+        include: {
+          courseToModality: {
+            include: {
+              courseModality: true
+            }
+          }
+        }
+      });
     });
 
-    if (!courseType) {
-      return res.status(400).json({ error: 'Tipo de curso não encontrado' });
+    // Transformar os dados para uma estrutura mais amigável para o frontend
+    if (course) {
+      const { courseToModality, ...courseData } = course;
+      const formattedCourse = {
+        ...courseData,
+        modalities: courseToModality.map(ctm => ctm.courseModality)
+      };
+
+      return res.status(200).json(formattedCourse);
     }
 
-    // Verificar se a modalidade de curso existe
-    const courseModality = await prisma.courseModality.findUnique({
-      where: { id: req.body.courseModalityId }
-    });
-
-    if (!courseModality) {
-      return res.status(400).json({ error: 'Modalidade de curso não encontrada' });
-    }
-
-    const course = await prisma.course.update({
-      where: { id: courseId },
-      data: req.body,
-      include: { 
-        courseType: true,
-        courseModality: true 
-      }
-    });
-
-    return res.status(200).json(course);
+    return res.status(500).json({ error: 'Erro ao atualizar curso' });
   } catch (error) {
     console.error('Erro ao atualizar curso:', error);
     return res.status(500).json({ error: 'Erro ao atualizar curso' });
@@ -557,9 +470,9 @@ export const updateCourse = async (req: Request, res: Response) => {
  */
 export const deleteCourse = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const courseId = parseInt(id, 10);
+  const courseId = Number.parseInt(id, 10);
 
-  if (isNaN(courseId)) {
+  if (Number.isNaN(courseId)) {
     return res.status(400).json({ error: 'ID do curso inválido' });
   }
 
@@ -584,8 +497,17 @@ export const deleteCourse = async (req: Request, res: Response) => {
       });
     }
 
-    await prisma.course.delete({
-      where: { id: courseId }
+    // Excluir o curso e seus relacionamentos
+    await prisma.$transaction(async (prisma) => {
+      // Remover todos os relacionamentos com modalidades
+      await prisma.courseToModality.deleteMany({
+        where: { courseId }
+      });
+
+      // Excluir o curso
+      await prisma.course.delete({
+        where: { id: courseId }
+      });
     });
 
     return res.status(200).json({ message: 'Curso excluído com sucesso' });

@@ -1,10 +1,5 @@
 import { Router } from 'express';
-import { 
-  getAllCourseTypes, 
-  getCourseTypeById, 
-  createCourseType, 
-  updateCourseType, 
-  deleteCourseType,
+import {
   getAllCourses,
   getCourseById,
   createCourse,
@@ -20,21 +15,14 @@ import { authenticate, requireAdmin } from '../middlewares/auth.middleware';
 
 const router = Router();
 
-// Rotas para CourseModality
+// Rotas para modalidades de curso (exigem autenticação de admin)
 router.get('/course-modalities', authenticate, getAllCourseModalities);
 router.get('/course-modalities/:id', authenticate, getCourseModalityById);
 router.post('/course-modalities', authenticate, requireAdmin, createCourseModality);
 router.put('/course-modalities/:id', authenticate, requireAdmin, updateCourseModality);
 router.delete('/course-modalities/:id', authenticate, requireAdmin, deleteCourseModality);
 
-// Rotas para CourseType
-router.get('/course-types', authenticate, getAllCourseTypes);
-router.get('/course-types/:id', authenticate, getCourseTypeById);
-router.post('/course-types', authenticate, requireAdmin, createCourseType);
-router.put('/course-types/:id', authenticate, requireAdmin, updateCourseType);
-router.delete('/course-types/:id', authenticate, requireAdmin, deleteCourseType);
-
-// Rotas para Course
+// Rotas para cursos (exigem autenticação de admin para criar, atualizar e excluir)
 router.get('/courses', authenticate, getAllCourses);
 router.get('/courses/:id', authenticate, getCourseById);
 router.post('/courses', authenticate, requireAdmin, createCourse);

@@ -33,40 +33,36 @@ enum Role {
 
 // Tabela de domínio para modalidades de curso (Formação/Atualização)
 model CourseModality {
-  id          Int       @id @default(autoincrement())
-  code        String    @unique
-  name        String
-  description String?
-  courses     Course[]  // Relação com cursos desta modalidade
-  students    Student[] // Relação com alunos desta modalidade
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-}
-
-// Tabela de domínio para Tipo de Curso
-model CourseType {
-  id          Int       @id @default(autoincrement())
-  code        String    @unique
-  name        String
-  description String?
-  courses     Course[]  // Relação com cursos deste tipo
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                Int                     @id @default(autoincrement())
+  code              String                  @unique // Código gerado automaticamente
+  name              String
+  description       String?
+  courseToModality  CourseToModality[]      // Relação com cursos (muitos-para-muitos)
+  students          Student[]               // Relação com alunos desta modalidade
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
 }
 
 // Tabela de domínio para Curso
 model Course {
-  id              Int            @id @default(autoincrement())
-  code            String         @unique
+  id              Int                  @id @default(autoincrement())
+  code            String               @unique // Código gerado automaticamente
   name            String
   description     String?
-  courseType      CourseType     @relation(fields: [courseTypeId], references: [id])
-  courseTypeId    Int
-  courseModality  CourseModality @relation(fields: [courseModalityId], references: [id])
+  courseToModality CourseToModality[]  // Relação com modalidades (muitos-para-muitos)
+  students        Student[]            // Relação com alunos que fizeram este curso
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+// Tabela de junção para relacionamento muitos-para-muitos entre cursos e modalidades
+model CourseToModality {
+  course          Course          @relation(fields: [courseId], references: [id])
+  courseId        Int
+  courseModality  CourseModality  @relation(fields: [courseModalityId], references: [id])
   courseModalityId Int
-  students        Student[]      // Relação com alunos que fizeram este curso
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+
+  @@id([courseId, courseModalityId])
 }
 
 // Modelo de aluno/cliente
