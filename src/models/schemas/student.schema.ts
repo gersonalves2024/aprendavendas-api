@@ -135,6 +135,11 @@ const studentBaseSchema = {
     .refine(val => ['Pago', 'Pendente', 'Parcial', 'Cancelado'].includes(val), {
       message: 'Status de pagamento inválido. Deve ser: Pago, Pendente, Parcial ou Cancelado'
     }),
+    
+  // Campos de cupom para o cadastro
+  couponCode: z.string().optional(),
+  discountAmount: z.number().optional(),
+  affiliateCommission: z.number().optional(),
 };
 
 /**
@@ -237,7 +242,16 @@ const updateStudentBaseSchema = z.object({
       })
       .transform(val => val ? new Date(val) : null),
     z.date().optional().nullable()
-  ])
+  ]),
+  
+  // Campos de cupom para atualização
+  couponCode: z.string().optional(),
+  discountAmount: z.number().optional().or(
+    z.string().transform(val => Number.parseFloat(val.replace(',', '.')))
+  ).optional(),
+  affiliateCommission: z.number().optional().or(
+    z.string().transform(val => Number.parseFloat(val.replace(',', '.')))
+  ).optional(),
 });
 
 // Cria o schema final com validação personalizada

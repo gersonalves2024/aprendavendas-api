@@ -90,7 +90,7 @@ export const createCourseModality = async (req: Request, res: Response) => {
   try {
     // Gerar código único para a modalidade
     const code = await generateUniqueCode("MOD");
-    
+
     const courseModality = await prisma.courseModality.create({
       data: {
         ...req.body,
@@ -221,7 +221,7 @@ export const getAllCourses = async (req: Request, res: Response) => {
       include: { 
         courseToModality: {
           include: {
-            courseModality: true
+        courseModality: true 
           }
         }
       },
@@ -261,7 +261,7 @@ export const getCourseById = async (req: Request, res: Response) => {
       include: { 
         courseToModality: {
           include: {
-            courseModality: true
+        courseModality: true 
           }
         }
       }
@@ -331,7 +331,7 @@ export const createCourse = async (req: Request, res: Response) => {
             courseId: newCourse.id,
             courseModalityId: modalityId
           }
-        });
+    });
       }
 
       // Buscar o curso completo com as modalidades
@@ -339,9 +339,9 @@ export const createCourse = async (req: Request, res: Response) => {
         where: { id: newCourse.id },
         include: {
           courseToModality: {
-            include: {
-              courseModality: true
-            }
+      include: { 
+        courseModality: true 
+      }
           }
         }
       });
@@ -400,7 +400,7 @@ export const updateCourse = async (req: Request, res: Response) => {
           in: modalityIds
         }
       }
-    });
+      });
 
     if (modalitiesCount !== modalityIds.length) {
       return res.status(400).json({ error: 'Uma ou mais modalidades de curso não foram encontradas' });
@@ -422,7 +422,7 @@ export const updateCourse = async (req: Request, res: Response) => {
         where: {
           courseId
         }
-      });
+    });
 
       // Criar os novos relacionamentos
       for (const modalityId of modalityIds) {
@@ -432,16 +432,16 @@ export const updateCourse = async (req: Request, res: Response) => {
             courseModalityId: modalityId
           }
         });
-      }
+    }
 
       // Buscar o curso atualizado com as modalidades
       return prisma.course.findUnique({
-        where: { id: courseId },
+      where: { id: courseId },
         include: {
           courseToModality: {
-            include: {
-              courseModality: true
-            }
+      include: { 
+        courseModality: true 
+      }
           }
         }
       });
@@ -505,8 +505,8 @@ export const deleteCourse = async (req: Request, res: Response) => {
       });
 
       // Excluir o curso
-      await prisma.course.delete({
-        where: { id: courseId }
+    await prisma.course.delete({
+      where: { id: courseId }
       });
     });
 

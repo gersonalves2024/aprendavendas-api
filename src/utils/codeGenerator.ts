@@ -32,4 +32,42 @@ export async function generateUniqueCode(prefix: string): Promise<string> {
   }
   
   return code;
-} 
+}
+
+export const generateCourseCode = (name: string): string => {
+  // Pegando até 3 caracteres do nome
+  const prefix = name.substring(0, 3).toUpperCase();
+  // Gerando 5 caracteres aleatórios (letras maiúsculas e números)
+  const randomChars = Array.from({ length: 5 }, () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    return chars.charAt(Math.floor(Math.random() * chars.length));
+  }).join('');
+
+  return `CRS-${prefix}${randomChars}`;
+};
+
+export const generateModalityCode = (name: string): string => {
+  // Pegando até 4 caracteres do nome
+  const prefix = name.substring(0, 4).toUpperCase();
+  // Gerando 4 caracteres aleatórios (letras maiúsculas e números)
+  const randomChars = Array.from({ length: 4 }, () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    return chars.charAt(Math.floor(Math.random() * chars.length));
+  }).join('');
+
+  return `MOD-${prefix}${randomChars}`;
+};
+
+export const generateCouponCode = (affiliateName: string): string => {
+  // Pegando até 4 caracteres do nome do afiliado (removendo espaços)
+  const nameWithoutSpaces = affiliateName.replace(/\s+/g, '');
+  const prefix = nameWithoutSpaces.substring(0, 4).toUpperCase();
+  
+  // Gerando 4 caracteres aleatórios (apenas letras maiúsculas)
+  const randomChars = Array.from({ length: 4 }, () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    return chars.charAt(Math.floor(Math.random() * chars.length));
+  }).join('');
+
+  return `${prefix}${randomChars}`;
+}; 

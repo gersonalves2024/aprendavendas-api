@@ -43,6 +43,9 @@ export interface CreateStudentInput {
   paymentStatus: string;
   paymentDate?: Date;
   paymentForecastDate?: Date;
+  couponCode?: string;
+  discountAmount?: number;
+  affiliateCommission?: number;
 }
 
 // Interface para atualização de aluno
@@ -64,6 +67,9 @@ export interface UpdateStudentInput {
   paymentStatus?: string;
   paymentDate?: Date;
   paymentForecastDate?: Date;
+  couponCode?: string;
+  discountAmount?: number;
+  affiliateCommission?: number;
 }
 
 // Interface para filtros de consulta de alunos

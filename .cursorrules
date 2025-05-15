@@ -1,0 +1,51 @@
+# AprendaControleVendas - Regras e Padrões de Desenvolvimento
+
+## Implementação do Sistema de Cupons
+
+### Backend (2024-07-15)
+- Atualizado o modelo `Student` e as interfaces `CreateStudentInput` e `UpdateStudentInput` para suportar campos relacionados a cupons:
+  - `couponCode`: código do cupom aplicado
+  - `discountAmount`: valor do desconto aplicado  
+  - `affiliateCommission`: valor da comissão do afiliado
+- Modificado o schema de validação para incluir validação desses campos
+- Atualizado o controller `createStudent` para:
+  - Buscar o cupom pelo código
+  - Validar se o cupom está ativo, não expirado e não excedeu o limite de uso
+  - Incrementar o contador de uso do cupom
+  - Associar o cupom ao aluno sendo cadastrado
+- Atualizado o controller `updateStudent` para:
+  - Processar alterações no cupom
+  - Incrementar contador do novo cupom (se houver)
+  - Decrementar contador do cupom anterior (se houver)
+
+### Frontend (2024-07-15)
+- Criado o componente `CouponApplyField` para validar cupons
+- Implementada a integração no formulário `StudentForm`
+- Serviço `student.service.ts` adaptado para enviar dados do cupom
+- Corrigida a duplicação do símbolo "R$" no campo de valor do curso
+- Corrigida a duplicação da label no campo de CPF
+
+### Regras de Negócio dos Cupons (2024-07-15)
+- Cada usuário (afiliado ou vendedor) pode ter múltiplos cupons, mas apenas um ativo
+- Cupons podem ter configurações por modalidade (modo geral) ou por curso específico
+- Cupons podem definir descontos fixos ou percentuais
+- Cupons podem definir comissões fixas ou percentuais (apenas para afiliados)
+- Cada cupom pode ter:
+  - Nome personalizado para identificação
+  - Data de validade 
+  - Limite de uso (quantidade máxima de vezes que pode ser usado)
+- Sistema mantém contador de uso dos cupons
+- Somente cupons ativos podem ser aplicados
+
+### Esclarecimento sobre o Nome Personalizado (2024-07-15)
+- O campo "Nome Personalizado" serve apenas para facilitar a identificação do cupom para o afiliado/vendedor
+- Não confundir com o código do cupom, que é gerado automaticamente pelo sistema
+- O código do cupom (e não o nome personalizado) é o que será usado na hora de cadastrar o aluno
+- O nome personalizado aparece apenas no painel de gerenciamento de cupons
+
+### Esclarecimento sobre o Valor Base (2024-07-15)
+- O "valor base" mencionado na configuração de cupom é o valor do curso informado durante o cadastro do aluno
+- O desconto do cupom é aplicado sobre este valor base (valor do curso)
+- No modo GENERAL, o cupom verifica se o valor do curso corresponde ao valor base configurado
+- No modo SPECIFIC, o cupom é aplicado diretamente ao curso específico, independente do valor
+- Todo o processo de desconto é aplicado sobre o valor informado durante o cadastro de aluno 
