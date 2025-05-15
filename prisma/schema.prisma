@@ -22,6 +22,7 @@ model User {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   students    Student[] // Relação com alunos cadastrados pelo usuário
+  coupons     Coupon[]  // Relação com cupons (pode ter múltiplos)
 }
 
 // Enum para tipos de usuário
@@ -29,6 +30,12 @@ enum Role {
   ADMIN
   SELLER
   AFFILIATE  // Perfil de afiliado
+}
+
+// Modo de aplicação do cupom
+enum CouponApplicationMode {
+  GENERAL    // Aplicação por modalidade e valor base
+  SPECIFIC   // Aplicação específica por curso
 }
 
 // Tabela de domínio para modalidades de curso (Formação/Atualização)
@@ -41,18 +48,20 @@ model CourseModality {
   students          Student[]               // Relação com alunos desta modalidade
   createdAt         DateTime                @default(now())
   updatedAt         DateTime                @updatedAt
+  couponConfigurations CouponConfiguration[] // Relação com configurações de cupom
 }
 
 // Tabela de domínio para Curso
 model Course {
-  id              Int                  @id @default(autoincrement())
-  code            String               @unique // Código gerado automaticamente
-  name            String
-  description     String?
-  courseToModality CourseToModality[]  // Relação com modalidades (muitos-para-muitos)
-  students        Student[]            // Relação com alunos que fizeram este curso
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  id                Int                  @id @default(autoincrement())
+  code              String               @unique // Código gerado automaticamente
+  name              String
+  description       String?
+  courseToModality  CourseToModality[]   // Relação com modalidades (muitos-para-muitos)
+  students          Student[]            // Relação com alunos que fizeram este curso
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  couponConfigurations CouponConfiguration[] // Relação com configurações de cupom
 }
 
 // Tabela de junção para relacionamento muitos-para-muitos entre cursos e modalidades
@@ -63,6 +72,41 @@ model CourseToModality {
   courseModalityId Int
 
   @@id([courseId, courseModalityId])
+}
+
+// Modelo de cupom de afiliado
+model Coupon {
+  id            Int                     @id @default(autoincrement())
+  code          String                  @unique // Código único para o cupom
+  customName    String?                 // Nome personalizado do cupom
+  userId        Int?                    // Relação com o usuário afiliado ou vendedor (agora opcional)
+  user          User?                   @relation(fields: [userId], references: [id])
+  active        Boolean                 @default(true)
+  applicationMode CouponApplicationMode
+  expirationDate DateTime?              // Data de validade do cupom
+  usageLimit    Int?                    // Limite de uso (null = ilimitado)
+  usageCount    Int                     @default(0) // Contador de uso atual
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  configurations CouponConfiguration[]  // Configurações do cupom
+  students      Student[]               // Alunos que usaram este cupom
+}
+
+// Configurações do cupom (modo geral ou específico)
+model CouponConfiguration {
+  id              Int              @id @default(autoincrement())
+  couponId        Int
+  coupon          Coupon           @relation(fields: [couponId], references: [id])
+  courseId        Int?             // Nullable para o modo GENERAL
+  course          Course?          @relation(fields: [courseId], references: [id])
+  courseModalityId Int?
+  courseModality  CourseModality?  @relation(fields: [courseModalityId], references: [id])
+  discountValue   Float?           // Valor de desconto (null se for percentual)
+  discountPercent Float?           // Percentual de desconto (null se for valor fixo)
+  commissionValue Float?           // Valor da comissão (null se for percentual)
+  commissionPercent Float?         // Percentual da comissão (null se for valor fixo)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 }
 
 // Modelo de aluno/cliente
@@ -88,6 +132,10 @@ model Student {
   paymentStatus             String          // Ex: Pago, Pendente
   paymentDate               DateTime?       // Data da transação do pagamento
   paymentForecastDate       DateTime?       // Data de previsão de pagamento
+  couponId                  Int?            // ID do cupom utilizado (nullable)
+  coupon                    Coupon?         @relation(fields: [couponId], references: [id])
+  discountAmount            Float?          // Valor do desconto aplicado
+  affiliateCommission       Float?          // Valor da comissão do afiliado
   createdAt                 DateTime        @default(now())
   updatedAt                 DateTime        @updatedAt
   createdBy                 User            @relation(fields: [userId], references: [id])
