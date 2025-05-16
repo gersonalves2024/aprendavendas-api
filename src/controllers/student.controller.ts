@@ -564,7 +564,20 @@ export const updateStudent = async (req: Request, res: Response): Promise<Respon
     const updatedStudent = await prisma.student.update({
       where: { id: Number.parseInt(id, 10) },
       data: {
-        ...studentData,
+        fullName: studentData.fullName,
+        ddd: studentData.ddd,
+        phone: studentData.phone,
+        email: studentData.email,
+        cpf: studentData.cpf,
+        cnhNumber: studentData.cnhNumber,
+        cnhType: studentData.cnhType,
+        renach: studentData.renach,
+        courseId: studentData.courseId,
+        courseModalityId: studentData.courseModalityId,
+        value: studentData.value,
+        paymentType: studentData.paymentType,
+        installments: studentData.installments,
+        paymentStatus: studentData.paymentStatus,
         birthDate: studentData.birthDate === null || studentData.birthDate === undefined 
           ? null 
           : new Date(studentData.birthDate),
