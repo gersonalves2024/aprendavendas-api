@@ -11,6 +11,7 @@ import studentRoutes from './routes/student.routes';
 import reportRoutes from './routes/report.routes';
 import courseRoutes from './routes/course.routes';
 import couponRoutes from './routes/coupon.routes';
+import paymentRoutes from './routes/payment.routes';
 
 // Inicialização
 const app = express();
@@ -80,6 +81,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/coupons', couponRoutes);
+app.use('/api/payments', paymentRoutes);
 app.use('/api', courseRoutes);
 
 // Iniciar servidor

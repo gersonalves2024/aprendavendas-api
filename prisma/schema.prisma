@@ -140,6 +140,25 @@ model Student {
   updatedAt                 DateTime        @updatedAt
   createdBy                 User            @relation(fields: [userId], references: [id])
   userId                    Int
+  paymentLinks              PaymentLink[]
+}
+
+// Modelo para armazenar os links de pagamento da Yapay
+model PaymentLink {
+  id             Int      @id @default(autoincrement())
+  yapayId        Int      // ID retornado pela Yapay
+  orderNumber    String   @unique // Número do pedido (CPF + timestamp)
+  code           String   // Código do curso
+  value          String   // Valor em formato string
+  description    String   // Descrição do curso
+  maxSplitTransaction Int // Número máximo de parcelas
+  availablePaymentMethods String // Métodos de pagamento disponíveis
+  paymentLink    String   // Link de pagamento
+  status         Int      // Status do pagamento (1 = pendente, etc)
+  studentId      Int      // ID do estudante
+  student        Student  @relation(fields: [studentId], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 // Outros modelos que poderão ser adicionados no futuro:
