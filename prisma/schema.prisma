@@ -1,5 +1,9 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
+//
+// Para executar a migração, use:
+// npx prisma generate
+// npx prisma migrate dev --name add_multiple_courses_transaction
 
 generator client {
   provider = "prisma-client-js"
@@ -23,6 +27,7 @@ model User {
   updatedAt   DateTime  @updatedAt
   students    Student[] // Relação com alunos cadastrados pelo usuário
   coupons     Coupon[]  // Relação com cupons (pode ter múltiplos)
+  transactions Transaction[] // Relação com transações registradas pelo usuário
 }
 
 // Enum para tipos de usuário
@@ -45,10 +50,10 @@ model CourseModality {
   name              String
   description       String?
   courseToModality  CourseToModality[]      // Relação com cursos (muitos-para-muitos)
-  students          Student[]               // Relação com alunos desta modalidade
   createdAt         DateTime                @default(now())
   updatedAt         DateTime                @updatedAt
   couponConfigurations CouponConfiguration[] // Relação com configurações de cupom
+  transactionCourses TransactionCourse[]    // Relação com cursos em transações
 }
 
 // Tabela de domínio para Curso
@@ -58,10 +63,10 @@ model Course {
   name              String
   description       String?
   courseToModality  CourseToModality[]   // Relação com modalidades (muitos-para-muitos)
-  students          Student[]            // Relação com alunos que fizeram este curso
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
   couponConfigurations CouponConfiguration[] // Relação com configurações de cupom
+  transactionCourses TransactionCourse[] // Relação com cursos em transações
 }
 
 // Tabela de junção para relacionamento muitos-para-muitos entre cursos e modalidades
@@ -89,7 +94,7 @@ model Coupon {
   createdAt     DateTime                @default(now())
   updatedAt     DateTime                @updatedAt
   configurations CouponConfiguration[]  // Configurações do cupom
-  students      Student[]               // Alunos que usaram este cupom
+  transactions  Transaction[]           // Relação com transações
 }
 
 // Configurações do cupom (modo geral ou específico)
@@ -122,43 +127,67 @@ model Student {
   cnhNumber                 String?
   cnhType                   String?
   renach                    String?
-  course                    Course          @relation(fields: [courseId], references: [id])
-  courseId                  Int
-  courseModality            CourseModality  @relation(fields: [courseModalityId], references: [id])
-  courseModalityId          Int
-  value                     Float
-  paymentType               String          // Ex: Cartão, Pix, Dinheiro
-  installments              Int             @default(1)
-  paymentStatus             String          // Ex: Pago, Pendente
-  paymentDate               DateTime?       // Data da transação do pagamento
-  paymentForecastDate       DateTime?       // Data de previsão de pagamento
-  couponId                  Int?            // ID do cupom utilizado (nullable)
-  coupon                    Coupon?         @relation(fields: [couponId], references: [id])
-  discountAmount            Float?          // Valor do desconto aplicado
-  affiliateCommission       Float?          // Valor da comissão do afiliado
   createdAt                 DateTime        @default(now())
   updatedAt                 DateTime        @updatedAt
   createdBy                 User            @relation(fields: [userId], references: [id])
   userId                    Int
   paymentLinks              PaymentLink[]
+  transactions              Transaction[]   // Relação com transações do aluno
 }
 
 // Modelo para armazenar os links de pagamento da Yapay
 model PaymentLink {
-  id             Int      @id @default(autoincrement())
-  yapayId        Int      // ID retornado pela Yapay
-  orderNumber    String   @unique // Número do pedido (CPF + timestamp)
-  code           String   // Código do curso
-  value          String   // Valor em formato string
-  description    String   // Descrição do curso
-  maxSplitTransaction Int // Número máximo de parcelas
-  availablePaymentMethods String // Métodos de pagamento disponíveis
-  paymentLink    String   // Link de pagamento
-  status         Int      // Status do pagamento (1 = pendente, etc)
-  studentId      Int      // ID do estudante
-  student        Student  @relation(fields: [studentId], references: [id])
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                       Int      @id @default(autoincrement())
+  yapayId                  Int
+  orderNumber              String   @unique
+  code                     String
+  value                    String
+  description              String
+  maxSplitTransaction      Int
+  availablePaymentMethods  String
+  paymentLink              String
+  status                   Int     // 0 = inativo, 1 = pendente, 2 = pago, 3 = cancelado
+  studentId                Int
+  student                  Student  @relation(fields: [studentId], references: [id])
+  transactionId            Int?    // Campo opcional que referencia a transação
+  transaction              Transaction? @relation(fields: [transactionId], references: [id])
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
+
+// Modelo para transações (vendas) - cada venda pode conter múltiplos cursos
+model Transaction {
+  id                Int                 @id @default(autoincrement())
+  studentId         Int
+  student           Student             @relation(fields: [studentId], references: [id])
+  totalValue        Float               // Valor total da transação
+  paymentType       String              // Tipo de pagamento
+  installments      Int                 @default(1)
+  paymentStatus     String              @default("Pendente")
+  paymentDate       DateTime?
+  paymentForecastDate DateTime?
+  createdById       Int
+  createdBy         User                @relation(fields: [createdById], references: [id])
+  couponId          Int?
+  coupon            Coupon?             @relation(fields: [couponId], references: [id])
+  discountAmount    Float?
+  courses           TransactionCourse[] // Cursos incluídos na transação
+  paymentLinks      PaymentLink[]       // Links de pagamento
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+}
+
+// Tabela de junção entre transação e cursos
+model TransactionCourse {
+  id                Int             @id @default(autoincrement())
+  transactionId     Int
+  transaction       Transaction     @relation(fields: [transactionId], references: [id])
+  courseId          Int
+  course            Course          @relation(fields: [courseId], references: [id])
+  courseModalityId  Int
+  courseModality    CourseModality  @relation(fields: [courseModalityId], references: [id])
+  
+  @@unique([transactionId, courseId, courseModalityId])
 }
 
 // Outros modelos que poderão ser adicionados no futuro:

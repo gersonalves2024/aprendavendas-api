@@ -697,44 +697,24 @@ export const listAllCoupons = async (req: Request, res: Response): Promise<Respo
   try {
     const coupons = await prisma.coupon.findMany({
       include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-          },
-        },
+        user: true,
         configurations: {
           include: {
             course: true,
             courseModality: true,
           },
         },
-        students: {
-          select: {
-            id: true,
-            fullName: true,
-            registrationDate: true,
-            value: true,
-            discountAmount: true,
-            affiliateCommission: true,
-            course: {
+        transactions: {
+          include: {
+            student: {
               select: {
                 id: true,
-                code: true,
-                name: true,
-              },
-            },
-            courseModality: {
-              select: {
-                id: true,
-                code: true,
-                name: true,
-              },
-            },
-          },
-        },
+                fullName: true,
+                registrationDate: true,
+              }
+            }
+          }
+        }
       },
     });
 
@@ -792,30 +772,17 @@ export const getAffiliateCoupon = async (req: Request, res: Response): Promise<R
             courseModality: true,
           },
         },
-        students: {
-          select: {
-            id: true,
-            fullName: true,
-            registrationDate: true,
-            value: true,
-            discountAmount: true,
-            affiliateCommission: true,
-            course: {
+        transactions: {
+          include: {
+            student: {
               select: {
                 id: true,
-                code: true,
-                name: true,
-              },
-            },
-            courseModality: {
-              select: {
-                id: true,
-                code: true,
-                name: true,
-              },
-            },
-          },
-        },
+                fullName: true,
+                registrationDate: true,
+              }
+            }
+          }
+        }
       },
     });
 
@@ -945,30 +912,17 @@ export const getActiveUserCoupon = async (req: Request, res: Response): Promise<
             courseModality: true,
           },
         },
-        students: {
-          select: {
-            id: true,
-            fullName: true,
-            registrationDate: true,
-            value: true,
-            discountAmount: true,
-            affiliateCommission: true,
-            course: {
+        transactions: {
+          include: {
+            student: {
               select: {
                 id: true,
-                code: true,
-                name: true,
-              },
-            },
-            courseModality: {
-              select: {
-                id: true,
-                code: true,
-                name: true,
-              },
-            },
-          },
-        },
+                fullName: true,
+                registrationDate: true,
+              }
+            }
+          }
+        }
       },
     });
 
@@ -989,7 +943,7 @@ export const getActiveUserCoupon = async (req: Request, res: Response): Promise<
   }
 };
 
-// Obter estatísticas do dashboard do afiliado
+// Atualizar getAffiliateDashboardStats para usar transactions em vez de students
 export const getAffiliateDashboardStats = async (req: Request, res: Response): Promise<Response> => {
   try {
     const userId = Number.parseInt(req.params.userId, 10);
@@ -1001,7 +955,7 @@ export const getAffiliateDashboardStats = async (req: Request, res: Response): P
       });
     }
 
-    // Verificar se o usuário existe e é um afiliado
+    // Buscar usuário para confirmar que é afiliado
     const user = await prisma.user.findUnique({
       where: { id: userId },
     });
@@ -1016,70 +970,94 @@ export const getAffiliateDashboardStats = async (req: Request, res: Response): P
     if (user.role !== 'AFFILIATE') {
       return res.status(400).json({
         error: 'Usuário não é afiliado',
-        message: 'Apenas usuários com papel de afiliado podem acessar estas estatísticas',
+        message: 'Apenas usuários com papel de afiliado podem ter dashboard',
       });
     }
-    
-    // Buscar o cupom ativo do afiliado com suas vendas
+
+    // Buscar cupom ativo do afiliado
     const coupon = await prisma.coupon.findFirst({
       where: { 
         userId,
         active: true
       },
       include: {
-        students: {
-          select: {
-            id: true,
-            registrationDate: true,
-            affiliateCommission: true
-          },
-        },
+        transactions: {
+          include: {
+            student: {
+              select: {
+                id: true,
+                fullName: true,
+                registrationDate: true,
+              }
+            }
+          }
+        }
       },
     });
-    
-    // Inicializar estatísticas
+
+    // Estatísticas iniciais (valor zero)
     const stats = {
       totalSales: 0,
-      pendingAmount: 0,
-      totalAmount: 0,
       monthlySales: 0,
-      lastPaymentDate: null
+      totalAmount: 0,
+      pendingAmount: 0,
+      recentActivity: [] as Array<{
+        id: number;
+        studentName: string;
+        date: string;
+        value: number;
+      }>,
     };
-    
-    if (coupon && coupon.students && coupon.students.length > 0) {
+
+    // Se o cupom existir e tiver transações associadas
+    if (coupon && coupon.transactions && coupon.transactions.length > 0) {
       // Calcular estatísticas
       const now = new Date();
       const currentMonth = now.getMonth();
       const currentYear = now.getFullYear();
       
-      stats.totalSales = coupon.students.length;
+      stats.totalSales = coupon.transactions.length;
       
       // Vendas do mês atual
-      stats.monthlySales = coupon.students.filter(sale => {
-        const saleDate = new Date(sale.registrationDate);
-        return saleDate.getMonth() === currentMonth && saleDate.getFullYear() === currentYear;
+      stats.monthlySales = coupon.transactions.filter(transaction => {
+        const transactionDate = new Date(transaction.createdAt);
+        return transactionDate.getMonth() === currentMonth && transactionDate.getFullYear() === currentYear;
       }).length;
       
-      // Somar comissões (assumindo que todas as comissões estão pendentes por simplicidade)
-      stats.pendingAmount = coupon.students.reduce((total, sale) => total + (sale.affiliateCommission || 0), 0);
+      // Para fins de simplificação, vamos usar discountAmount como comissão
+      // Em um sistema real, você teria um campo específico para comissão
+      stats.pendingAmount = coupon.transactions.reduce((total, transaction) => total + (transaction.discountAmount || 0), 0);
       
       // Em um sistema real, precisaríamos de um status de pagamento para cada comissão
-      // Por enquanto, estamos apenas simulando que comissões mais antigas que 30 dias já foram pagas
-      const thirtyDaysAgo = new Date(now);
+      // Para este exemplo, vamos considerar transações de mais de 30 dias como pagas
+      const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       
-      stats.totalAmount = coupon.students
-        .filter(sale => new Date(sale.registrationDate) < thirtyDaysAgo)
-        .reduce((total, sale) => total + (sale.affiliateCommission || 0), 0);
+      stats.totalAmount = coupon.transactions
+        .filter(transaction => new Date(transaction.createdAt) < thirtyDaysAgo)
+        .reduce((total, transaction) => total + (transaction.discountAmount || 0), 0);
+      
+      // Atividade recente (últimas 5 transações)
+      stats.recentActivity = coupon.transactions
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 5)
+        .map(transaction => ({
+          id: transaction.id,
+          studentName: transaction.student.fullName,
+          date: new Date(transaction.createdAt).toISOString().split('T')[0],
+          value: transaction.discountAmount || 0,
+        }));
     }
-    
-    return res.status(200).json(stats);
-    
+
+    return res.status(200).json({
+      stats,
+      coupon,
+    });
   } catch (error) {
     console.error('Erro ao buscar estatísticas do afiliado:', error);
     return res.status(500).json({
       error: 'Erro interno do servidor',
-      message: 'Não foi possível buscar as estatísticas do afiliado',
+      message: 'Não foi possível buscar as estatísticas',
     });
   }
 }; 

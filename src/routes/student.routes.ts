@@ -4,7 +4,9 @@ import {
   getStudents, 
   getStudentById, 
   updateStudent, 
-  deleteStudent 
+  deleteStudent,
+  addCoursesToStudent,
+  deleteTransaction
 } from '../controllers/student.controller';
 import { 
   authenticate, 
@@ -18,7 +20,8 @@ import {
   createStudentSchema, 
   updateStudentSchema, 
   paginationSchema, 
-  filtersSchema 
+  filtersSchema,
+  addCoursesToStudentSchema
 } from '../models/schemas/student.schema';
 import { Role } from '../models/user.model';
 
@@ -39,6 +42,12 @@ router.get('/:id', getStudentById);
 
 // Apenas vendedores podem atualizar alunos
 router.put('/:id', requireProfile([Role.SELLER]), validate(updateStudentSchema), updateStudent);
+
+// Adicionar nova transação/cursos a um aluno existente
+router.post('/:id/transactions', requireProfile([Role.SELLER]), validate(addCoursesToStudentSchema), addCoursesToStudent);
+
+// Excluir uma transação específica de um aluno
+router.delete('/:studentId/transactions/:transactionId', requireAdmin, deleteTransaction);
 
 // Apenas administradores podem excluir alunos
 router.delete('/:id', requireAdmin, deleteStudent);

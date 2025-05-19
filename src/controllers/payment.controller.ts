@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { yapayService, YapayPaymentLinkRequest } from '../services/yapay.service';
+import { paymentStatusUpdater } from '../services/payment-status-updater.service';
 
 const prisma = new PrismaClient();
 
@@ -12,11 +13,12 @@ const prisma = new PrismaClient();
  */
 export const generatePaymentLink = async (req: Request, res: Response): Promise<Response> => {
   try {
+    // Obter studentId dos parâmetros da URL (/:studentId)
     const { studentId } = req.params;
-    const { paymentMethod, maxSplitTransaction = '1' } = req.body;
+    const { transactionId, paymentMethod, maxSplitTransaction = 12 } = req.body;
 
-    // Validar ID do estudante
-    if (!studentId || isNaN(Number(studentId))) {
+    // Validações básicas de entrada
+    if (!studentId || Number.isNaN(Number(studentId))) {
       return res.status(400).json({
         error: 'ID do estudante inválido',
         message: 'O ID do estudante deve ser um número válido',
@@ -27,8 +29,20 @@ export const generatePaymentLink = async (req: Request, res: Response): Promise<
     const student = await prisma.student.findUnique({
       where: { id: Number(studentId) },
       include: {
-        course: true,
-        courseModality: true,
+        transactions: {
+          include: {
+            courses: {
+              include: {
+                course: true,
+                courseModality: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 1
+        }
       },
     });
 
@@ -39,16 +53,55 @@ export const generatePaymentLink = async (req: Request, res: Response): Promise<
       });
     }
 
-    // Verificar se o estudante já tem um link de pagamento pendente
-    const existingPaymentLink = await prisma.paymentLink.findFirst({
-      where: {
-        studentId: Number(studentId),
-        status: 1, // Status pendente
-      },
-    });
-
-    if (existingPaymentLink) {
-      return res.status(200).json(existingPaymentLink);
+    // Para links de transações específicas, buscar dados da transação
+    let transaction = null;
+    if (transactionId) {
+      transaction = await prisma.transaction.findFirst({
+        where: {
+          id: Number(transactionId),
+          studentId: Number(studentId)
+        },
+        include: {
+          courses: {
+            include: {
+              course: true,
+              courseModality: true
+            }
+          }
+        }
+      });
+      
+      if (!transaction) {
+        return res.status(404).json({
+          error: 'Transação não encontrada',
+          message: 'A transação especificada não foi encontrada para este estudante'
+        });
+      }
+      
+      // Verificar se já existe um link de pagamento pendente para esta transação
+      const existingTransactionPaymentLink = await prisma.paymentLink.findFirst({
+        where: {
+          studentId: Number(studentId),
+          transactionId: Number(transactionId),
+          status: 1, // Status pendente
+        },
+      });
+      
+      if (existingTransactionPaymentLink) {
+        return res.status(200).json(existingTransactionPaymentLink);
+      }
+    } else {
+      // Se não for especificada uma transação, verificar se há link pendente para o estudante
+      const existingPaymentLink = await prisma.paymentLink.findFirst({
+        where: {
+          studentId: Number(studentId),
+          status: 1, // Status pendente
+        },
+      });
+      
+      if (existingPaymentLink) {
+        return res.status(200).json(existingPaymentLink);
+      }
     }
 
     // Definir métodos de pagamento disponíveis
@@ -61,18 +114,57 @@ export const generatePaymentLink = async (req: Request, res: Response): Promise<
     const timestamp = new Date().getTime();
     const orderNumber = `${student.cpf.replace(/[^\d]/g, '')}${timestamp}`;
 
-    // Calcular valor final (considerando desconto do cupom, se houver)
-    const finalValue = student.discountAmount ? 
-      (student.value - student.discountAmount).toFixed(2) : 
-      student.value.toFixed(2);
-
-    // Criar descrição do curso
-    const description = `${student.courseModality?.name || ''} ${student.course?.name || ''}`.trim();
+    // Se tiver transação específica, usar seus dados
+    let finalValue, description;
+    
+    if (transaction) {
+      // Usar o valor da transação
+      finalValue = transaction.discountAmount ? 
+        (transaction.totalValue - transaction.discountAmount).toFixed(2) : 
+        transaction.totalValue.toFixed(2);
+      
+      // Criar descrição baseada nos cursos da transação
+      if (transaction.courses && transaction.courses.length > 0) {
+        description = transaction.courses.map(c => 
+          `${c.courseModality?.name || ''} ${c.course?.name || ''}`
+        ).join(', ').trim();
+      } else {
+        description = 'Cursos';
+      }
+    } else {
+      // Usar valores da transação mais recente (comportamento adaptado)
+      const latestTransaction = student.transactions && student.transactions.length > 0 
+        ? student.transactions[0] 
+        : null;
+      
+      if (!latestTransaction) {
+        return res.status(400).json({
+          error: 'Transação não encontrada',
+          message: 'O estudante não possui nenhuma transação registrada'
+        });
+      }
+      
+      finalValue = latestTransaction.discountAmount ? 
+        (latestTransaction.totalValue - latestTransaction.discountAmount).toFixed(2) : 
+        latestTransaction.totalValue.toFixed(2);
+      
+      // Criar descrição baseada nos cursos da transação
+      if (latestTransaction.courses && latestTransaction.courses.length > 0) {
+        description = latestTransaction.courses.map(c => 
+          `${c.courseModality?.name || ''} ${c.course?.name || ''}`
+        ).join(', ').trim();
+      } else {
+        description = 'Cursos';
+      }
+      
+      // Atualizar a variável de transação para usar nas chamadas seguintes
+      transaction = latestTransaction;
+    }
 
     // Preparar dados para requisição à API da Yapay
     const paymentData: YapayPaymentLinkRequest = {
       order_number: orderNumber,
-      code: student.course?.code || student.course?.id.toString() || 'CURSO',
+      code: transaction?.id.toString() || 'CURSO',
       value: finalValue,
       description: description || 'Curso',
       max_split_transaction: maxSplitTransaction,
@@ -110,6 +202,7 @@ export const generatePaymentLink = async (req: Request, res: Response): Promise<
         paymentLink: paymentLinkResponse.payment_link,
         status: statusInt,
         studentId: Number(studentId),
+        transactionId: transaction ? Number(transaction.id) : undefined,
       },
     });
 
@@ -134,7 +227,7 @@ export const getStudentPaymentLinks = async (req: Request, res: Response): Promi
     const { studentId } = req.params;
 
     // Validar ID do estudante
-    if (!studentId || isNaN(Number(studentId))) {
+    if (!studentId || Number.isNaN(Number(studentId))) {
       return res.status(400).json({
         error: 'ID do estudante inválido',
         message: 'O ID do estudante deve ser um número válido',
@@ -169,36 +262,93 @@ export const getStudentPaymentLinks = async (req: Request, res: Response): Promi
  */
 export const updatePaymentLinkStatus = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const { paymentLinkId } = req.params;
+    const { linkId } = req.params;
     const { status } = req.body;
 
-    // Validar ID do link de pagamento
-    if (!paymentLinkId || isNaN(Number(paymentLinkId))) {
+    // Validar ID do link
+    if (!linkId || Number.isNaN(Number(linkId))) {
       return res.status(400).json({
-        error: 'ID do link de pagamento inválido',
-        message: 'O ID do link de pagamento deve ser um número válido',
+        error: 'ID do link inválido',
+        message: 'O ID do link deve ser um número válido',
       });
     }
 
     // Validar status
-    if (status === undefined || isNaN(Number(status))) {
+    if (!status || !['1', '2', '3'].includes(String(status))) {
       return res.status(400).json({
         error: 'Status inválido',
-        message: 'O status deve ser um número válido',
+        message: 'O status deve ser 1 (pendente), 2 (pago) ou 3 (cancelado)',
       });
     }
 
-    // Atualizar status do link de pagamento
-    const updatedPaymentLink = await prisma.paymentLink.update({
-      where: {
-        id: Number(paymentLinkId),
-      },
-      data: {
-        status: Number(status),
+    // Buscar link de pagamento
+    const paymentLink = await prisma.paymentLink.findUnique({
+      where: { id: Number(linkId) },
+      include: { 
+        student: true,
+        transaction: true
       },
     });
 
-    return res.status(200).json(updatedPaymentLink);
+    if (!paymentLink) {
+      return res.status(404).json({
+        error: 'Link não encontrado',
+        message: 'O link de pagamento informado não foi encontrado',
+      });
+    }
+
+    // Atualizar status do link
+    const updatedPaymentLink = await prisma.paymentLink.update({
+      where: { id: Number(linkId) },
+      data: { status: Number(status) },
+    });
+
+    // Mapear status numérico para texto
+    const systemStatus = Number(status) === 1 ? 'Pendente' : 
+                         Number(status) === 2 ? 'Pago' : 
+                         Number(status) === 3 ? 'Cancelado' : 'Desconhecido';
+    
+    // Se o status foi alterado para pago (2), atualizar na transação
+    if (Number(status) === 2) {
+      // Se tiver transação associada, atualizar o status e a data de pagamento na transação
+      if (paymentLink.transactionId) {
+        await prisma.transaction.update({
+          where: { id: paymentLink.transactionId },
+          data: {
+            paymentStatus: 'Pago',
+            paymentDate: new Date()
+          }
+        });
+        
+        // Não precisamos mais atualizar o status no estudante pois foi removido
+      } else {
+        // Caso não tenha transação associada, não fazemos nada
+        console.log('Não há transação associada a este link de pagamento, status do estudante não foi atualizado');
+      }
+    } else if (Number(status) === 3) {
+      // Se foi cancelado (3)
+      // Se tiver transação associada, atualizar o status na transação
+      if (paymentLink.transactionId) {
+        await prisma.transaction.update({
+          where: { id: paymentLink.transactionId },
+          data: {
+            paymentStatus: 'Cancelado',
+            // Limpar data de pagamento caso estivesse preenchida
+            paymentDate: null
+          }
+        });
+        
+        // Não precisamos mais atualizar o status no estudante pois foi removido
+      } else {
+        // Caso não tenha transação associada, não fazemos nada
+        console.log('Não há transação associada a este link de pagamento, status do estudante não foi atualizado');
+      }
+    }
+
+    return res.status(200).json({
+      message: 'Status do link de pagamento atualizado com sucesso',
+      paymentLink: updatedPaymentLink,
+    });
   } catch (error) {
     console.error('Erro ao atualizar status do link de pagamento:', error);
     return res.status(500).json({
@@ -208,8 +358,151 @@ export const updatePaymentLinkStatus = async (req: Request, res: Response): Prom
   }
 };
 
-export default {
-  generatePaymentLink,
-  getStudentPaymentLinks,
-  updatePaymentLinkStatus,
+/**
+ * Verifica e atualiza o status de todos os pagamentos pendentes
+ * @param req Requisição
+ * @param res Resposta
+ * @returns Resposta HTTP com estatísticas de atualização
+ */
+export const checkPendingPayments = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    // Verificar se o usuário está autenticado e tem permissão
+    if (!req.user) {
+      return res.status(401).json({
+        error: 'Usuário não autenticado',
+        message: 'É necessário estar autenticado para executar esta operação'
+      });
+    }
+
+    if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({
+        error: 'Permissão negada',
+        message: 'Apenas administradores podem executar esta operação'
+      });
+    }
+
+    console.log('Iniciando verificação de pagamentos pendentes (acionada manualmente)');
+    const result = await paymentStatusUpdater.updatePendingPayments();
+
+    return res.status(200).json({
+      message: 'Verificação de pagamentos concluída',
+      stats: {
+        checked: result.checked,
+        updated: result.updated,
+        errors: result.errors
+      },
+      details: result.details
+    });
+  } catch (error) {
+    console.error('Erro ao verificar pagamentos pendentes:', error);
+    return res.status(500).json({
+      error: 'Erro interno do servidor',
+      message: 'Não foi possível verificar os pagamentos pendentes'
+    });
+  }
+};
+
+/**
+ * Verifica e atualiza o status de um link de pagamento específico de um estudante
+ * @param req Requisição com o ID do estudante
+ * @param res Resposta
+ * @returns Resposta HTTP com o resultado da verificação
+ */
+export const checkStudentPaymentStatus = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const { studentId } = req.params;
+
+    // Validar ID do estudante
+    if (!studentId || Number.isNaN(Number(studentId))) {
+      return res.status(400).json({
+        error: 'ID do estudante inválido',
+        message: 'O ID do estudante deve ser um número válido',
+      });
+    }
+
+    // Verificar se o usuário está autenticado
+    if (!req.user) {
+      return res.status(401).json({
+        error: 'Usuário não autenticado',
+        message: 'É necessário estar autenticado para executar esta operação'
+      });
+    }
+
+    console.log(`Verificando status do último link de pagamento do estudante ID ${studentId}...`);
+    const result = await paymentStatusUpdater.checkSpecificPaymentLink(Number(studentId), true);
+
+    if (result.error && !result.orderNumber) {
+      return res.status(404).json({
+        message: result.error
+      });
+    }
+
+    if (result.updated) {
+      return res.status(200).json({
+        message: `Status do pagamento atualizado com sucesso de ${result.oldStatus} para ${result.newStatus}`,
+        studentUpdated: result.studentUpdated,
+        orderNumber: result.orderNumber,
+        oldStatus: result.oldStatus,
+        newStatus: result.newStatus
+      });
+    } else {
+      return res.status(200).json({
+        message: result.error || `Status do pagamento não mudou (${result.newStatus})`,
+        orderNumber: result.orderNumber,
+        status: result.newStatus
+      });
+    }
+  } catch (error) {
+    console.error('Erro ao verificar status do pagamento:', error);
+    return res.status(500).json({
+      error: 'Erro interno do servidor',
+      message: 'Não foi possível verificar o status do pagamento'
+    });
+  }
+};
+
+/**
+ * Obtém os links de pagamento de uma transação específica
+ * @param req Requisição com o ID do estudante e da transação
+ * @param res Resposta com os links de pagamento da transação
+ * @returns Resposta HTTP
+ */
+export const getTransactionPaymentLinks = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const { studentId, transactionId } = req.params;
+
+    // Validar IDs
+    if (!studentId || Number.isNaN(Number(studentId))) {
+      return res.status(400).json({
+        error: 'ID do estudante inválido',
+        message: 'O ID do estudante deve ser um número válido',
+      });
+    }
+
+    if (!transactionId || Number.isNaN(Number(transactionId))) {
+      return res.status(400).json({
+        error: 'ID da transação inválido',
+        message: 'O ID da transação deve ser um número válido',
+      });
+    }
+
+    // Buscar links de pagamento da transação específica
+    const paymentLinks = await prisma.paymentLink.findMany({
+      where: {
+        studentId: Number(studentId),
+        transactionId: Number(transactionId),
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return res.status(200).json(paymentLinks);
+  } catch (error) {
+    console.error('Erro ao buscar links de pagamento da transação:', error);
+    return res.status(500).json({
+      error: 'Erro interno do servidor',
+      message: 'Não foi possível buscar os links de pagamento da transação',
+    });
+  }
 }; 

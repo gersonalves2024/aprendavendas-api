@@ -1,28 +1,52 @@
 import express from 'express';
-import { authenticate } from '../middlewares/auth.middleware';
-import paymentController from '../controllers/payment.controller';
+import { authenticate, requireAdmin } from '../middlewares/auth.middleware';
+import * as paymentController from '../controllers/payment.controller';
 
 const router = express.Router();
 
-/**
- * @route POST /api/payments/students/:studentId
- * @desc Gera um link de pagamento para um estudante
- * @access Private
- */
-router.post('/students/:studentId', authenticate, paymentController.generatePaymentLink);
+// Todas as rotas requerem autenticação
+router.use(authenticate);
 
 /**
- * @route GET /api/payments/students/:studentId
- * @desc Obtém os links de pagamento de um estudante
- * @access Private
+ * @route   POST /api/payments/link/:studentId
+ * @desc    Gera um link de pagamento para um estudante
+ * @access  Private
  */
-router.get('/students/:studentId', authenticate, paymentController.getStudentPaymentLinks);
+router.post('/link/:studentId', paymentController.generatePaymentLink);
 
 /**
- * @route PUT /api/payments/:paymentLinkId/status
- * @desc Atualiza o status de um link de pagamento
- * @access Private
+ * @route   GET /api/payments/link/:studentId
+ * @desc    Obtém os links de pagamento de um estudante
+ * @access  Private
  */
-router.put('/:paymentLinkId/status', authenticate, paymentController.updatePaymentLinkStatus);
+router.get('/link/:studentId', paymentController.getStudentPaymentLinks);
+
+/**
+ * @route   GET /api/payments/link/:studentId/transaction/:transactionId
+ * @desc    Obtém os links de pagamento de uma transação específica
+ * @access  Private
+ */
+router.get('/link/:studentId/transaction/:transactionId', paymentController.getTransactionPaymentLinks);
+
+/**
+ * @route   PUT /api/payments/link/:linkId
+ * @desc    Atualiza o status de um link de pagamento
+ * @access  Private
+ */
+router.put('/link/:linkId/status', paymentController.updatePaymentLinkStatus);
+
+/**
+ * @route   POST /api/payments/check-pending
+ * @desc    Verifica e atualiza o status de pagamentos pendentes
+ * @access  Private (Admin only)
+ */
+router.post('/check-pending', requireAdmin, paymentController.checkPendingPayments);
+
+/**
+ * @route   POST /api/payments/check-student/:studentId
+ * @desc    Verifica e atualiza o status do último link de pagamento de um estudante
+ * @access  Private
+ */
+router.post('/check-student/:studentId', paymentController.checkStudentPaymentStatus);
 
 export default router; 

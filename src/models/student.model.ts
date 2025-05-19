@@ -24,7 +24,7 @@ export interface Student {
   userId: number;
 }
 
-// Interface para criação de aluno
+// Interface para criação de aluno (versão com suporte a múltiplos cursos)
 export interface CreateStudentInput {
   fullName: string;
   ddd: string;
@@ -35,8 +35,17 @@ export interface CreateStudentInput {
   cnhNumber?: string;
   cnhType?: string;
   renach?: string;
+  // Dados para compatibilidade - primeiro curso
   courseId: number;
   courseModalityId: number;
+  // Novos campos para múltiplos cursos
+  courses?: {
+    courseId: number;
+    courseModalityId: number;
+  }[];
+  // Campo valor total (obrigatório)
+  totalValue: number;
+  // Mantidos para compatibilidade
   value: number;
   paymentType: string;
   installments: number;
@@ -59,9 +68,18 @@ export interface UpdateStudentInput {
   cnhNumber?: string;
   cnhType?: string;
   renach?: string;
+  // Dados para compatibilidade com sistema antigo
   courseId?: number;
   courseModalityId?: number;
   value?: number;
+  // Novos campos para múltiplos cursos
+  courses?: {
+    courseId: number;
+    courseModalityId: number;
+  }[];
+  // Campo valor total (opcional na atualização)
+  totalValue?: number;
+  // Demais campos
   paymentType?: string;
   installments?: number;
   paymentStatus?: string;

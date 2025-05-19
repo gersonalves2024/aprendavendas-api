@@ -33,6 +33,45 @@ interface YapayPaymentLinkResponse {
   created_at: string;
 }
 
+// Interface para a resposta da consulta de status
+interface YapayTransactionStatusResponse {
+  resource: string;
+  pagination: {
+    current_page: number;
+    per_page: number;
+    page_amount: number;
+    count: number;
+  };
+  data: Array<{
+    resource: string;
+    id: number;
+    order_number: string;
+    original_price: number;
+    tax: number;
+    seller_price: number;
+    payment_price: number;
+    discount_price: number;
+    additional_price: number;
+    sub_store: string;
+    created: number;
+    updated: number;
+    status: {
+      resource: string;
+      name: string;
+      id: number;
+    };
+    payment: {
+      resource: string;
+      tid: string;
+      brand_tid: string;
+      payment_method_id: number;
+      payment_method_name: string;
+      installments: number;
+    };
+    // Outros campos podem ser adicionados conforme necessário
+  }>;
+}
+
 class YapayService {
   private apiUrl: string;
   private consumerKey: string;
@@ -170,6 +209,91 @@ class YapayService {
         console.error("Erro:", axiosError.message);
       }
       throw new Error('Falha ao gerar link de pagamento');
+    }
+  }
+
+  /**
+   * Consulta o status de uma transação pelo número do pedido
+   * @param orderNumber Número do pedido
+   * @returns Status da transação
+   */
+  async checkTransactionStatus(orderNumber: string): Promise<{
+    status: string;
+    statusId: number;
+    yapayId?: number;
+  }> {
+    try {
+      // Obter token de acesso
+      const accessToken = await this.getAccessToken();
+      console.log(`Consultando status da transação com order_number: ${orderNumber}`);
+
+      // Fazer requisição para API da Yapay
+      const response = await axios.get(
+        `${this.apiUrl}/api/v3/sales?order_number=${orderNumber}`,
+        {
+          headers: {
+            'Authorization': `Token token=${accessToken}, type=access_token`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      // Log da resposta completa para debug
+      console.log(`Resposta da API para ordem ${orderNumber}:`, JSON.stringify(response.data, null, 2));
+
+      // Verificar se há transações na resposta
+      if (!response.data.data || response.data.data.length === 0) {
+        console.log(`Nenhuma transação encontrada para o order_number: ${orderNumber}`);
+        return {
+          status: 'waiting_payment',
+          statusId: 1
+        };
+      }
+
+      // Pegar a primeira transação (normalmente só haverá uma)
+      const transaction = response.data.data[0];
+      
+      // Extrair dados do status corretamente
+      // No novo formato, status é um objeto com propriedade 'name' e 'id'
+      let statusName = 'waiting_payment';
+      let statusId = 1;
+      
+      if (transaction.status) {
+        if (typeof transaction.status === 'object' && transaction.status.name) {
+          // Novo formato: status é um objeto com name e id
+          statusName = transaction.status.name;
+          statusId = transaction.status.id || 1;
+          console.log(`Status da transação extraído do objeto: name=${statusName}, id=${statusId}`);
+        } else if (typeof transaction.status === 'string') {
+          // Formato antigo: status é uma string
+          statusName = transaction.status;
+          statusId = transaction.status_id || 1;
+          console.log(`Status da transação extraído como string: ${statusName}`);
+        } else {
+          console.log(`Formato de status desconhecido:`, transaction.status);
+        }
+      } else {
+        console.log(`Nenhum status encontrado na transação`, transaction);
+      }
+      
+      return {
+        status: statusName.toLowerCase(), // Normaliza para lowercase
+        statusId: statusId,
+        yapayId: transaction.id
+      };
+    } catch (error: unknown) {
+      console.error(`Erro ao consultar status da transação ${orderNumber}:`, error);
+      const axiosError = error as AxiosError;
+      if (axiosError.response) {
+        console.error("Status:", axiosError.response.status);
+        console.error("Dados:", axiosError.response.data);
+      } else if (axiosError.request) {
+        console.error("Não houve resposta:", axiosError.request);
+      } else {
+        console.error("Erro:", axiosError.message);
+      }
+      throw new Error(`Falha ao consultar status da transação ${orderNumber}`);
     }
   }
 }

@@ -151,32 +151,32 @@ export const deleteCourseModality = async (req: Request, res: Response) => {
   const modalityId = Number.parseInt(id, 10);
 
   if (Number.isNaN(modalityId)) {
-    return res.status(400).json({ error: 'ID da modalidade de curso inválido' });
+    return res.status(400).json({ error: 'ID da modalidade inválido' });
   }
 
   try {
-    // Verificar se a modalidade de curso existe
-    const existingCourseModality = await prisma.courseModality.findUnique({
+    // Verificar se a modalidade existe
+    const existingModality = await prisma.courseModality.findUnique({
       where: { id: modalityId }
     });
 
-    if (!existingCourseModality) {
+    if (!existingModality) {
       return res.status(404).json({ error: 'Modalidade de curso não encontrada' });
     }
 
     // Verificar se há cursos usando esta modalidade
-    const coursesUsingModality = await prisma.courseToModality.count({
+    const coursesToModality = await prisma.courseToModality.count({
       where: { courseModalityId: modalityId }
     });
 
-    if (coursesUsingModality > 0) {
+    if (coursesToModality > 0) {
       return res.status(400).json({ 
         error: 'Não é possível excluir esta modalidade pois existem cursos associados a ela' 
       });
     }
 
-    // Verificar se há alunos usando esta modalidade
-    const studentsUsingModality = await prisma.student.count({
+    // Verificar se há alunos usando esta modalidade através das transações
+    const studentsUsingModality = await prisma.transactionCourse.count({
       where: { courseModalityId: modalityId }
     });
 
@@ -486,8 +486,8 @@ export const deleteCourse = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Curso não encontrado' });
     }
 
-    // Verificar se há alunos usando este curso
-    const studentsUsingCourse = await prisma.student.count({
+    // Verificar se há alunos usando este curso através das transações
+    const studentsUsingCourse = await prisma.transactionCourse.count({
       where: { courseId }
     });
 
@@ -505,8 +505,8 @@ export const deleteCourse = async (req: Request, res: Response) => {
       });
 
       // Excluir o curso
-    await prisma.course.delete({
-      where: { id: courseId }
+      await prisma.course.delete({
+        where: { id: courseId }
       });
     });
 

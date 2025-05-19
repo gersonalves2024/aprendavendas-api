@@ -98,11 +98,29 @@ const studentBaseSchema = {
   
   renach: z.string().optional().nullable()
     .transform(val => val === '' ? null : val),
+};
+
+// Definição do schema para um curso individual
+const courseSchema = z.object({
+  courseId: z.number().int().positive({ message: 'ID do curso é obrigatório' }),
+  courseModalityId: z.number().int().positive({ message: 'ID da modalidade do curso é obrigatório' })
+});
+
+/**
+ * Schema para criação de aluno
+ */
+const createStudentBaseSchema = z.object({
+  ...studentBaseSchema,
+  // Campos obrigatórios apenas na criação
+  fullName: studentBaseSchema.fullName,
+  ddd: studentBaseSchema.ddd,
+  phone: studentBaseSchema.phone,
+  cpf: studentBaseSchema.cpf,
   
+  // Campos para a primeira transação do aluno (não são mais parte do modelo Student)
+  // Precisamos manter esses campos para criar a transação associada
   courseModalityId: z.number().int().positive({ message: 'Modalidade de curso é obrigatória' }),
-  
   courseId: z.number().int().positive({ message: 'Nome do curso é obrigatório' }),
-  
   value: z.number().positive({ message: 'Valor deve ser positivo' })
     .or(
       z.string().transform(val => Number.parseFloat(val.replace(',', '.')))
@@ -111,6 +129,21 @@ const studentBaseSchema = {
       message: 'Valor deve ser um número positivo' 
     }),
   
+  // Novos campos para múltiplos cursos
+  courses: z.array(courseSchema).optional(),
+  totalValue: z.number().positive({ message: 'Valor total deve ser positivo' })
+    .or(
+      z.string().transform(val => Number.parseFloat(val.replace(',', '.')))
+    )
+    .refine(val => !Number.isNaN(val) && val > 0, { 
+      message: 'Valor total deve ser um número positivo' 
+    })
+    .optional(),
+  
+  // Campo para identificar aluno existente ao adicionar novos cursos
+  existingStudentId: z.number().int().positive().optional(),
+  
+  // Campos de transação (não são mais parte do modelo Student)
   paymentType: z.string().min(1, { message: 'Tipo de pagamento é obrigatório' })
     .refine(val => [
       'Dinheiro', 
@@ -135,29 +168,7 @@ const studentBaseSchema = {
     .refine(val => ['Pago', 'Pendente', 'Parcial', 'Cancelado'].includes(val), {
       message: 'Status de pagamento inválido. Deve ser: Pago, Pendente, Parcial ou Cancelado'
     }),
-    
-  // Campos de cupom para o cadastro
-  couponCode: z.string().optional(),
-  discountAmount: z.number().optional(),
-  affiliateCommission: z.number().optional(),
-};
-
-/**
- * Schema para criação de aluno
- */
-const createStudentBaseSchema = z.object({
-  ...studentBaseSchema,
-  // Campos obrigatórios apenas na criação
-  fullName: studentBaseSchema.fullName,
-  ddd: studentBaseSchema.ddd,
-  phone: studentBaseSchema.phone,
-  cpf: studentBaseSchema.cpf,
-  courseModalityId: studentBaseSchema.courseModalityId,
-  courseId: studentBaseSchema.courseId,
-  value: studentBaseSchema.value,
-  paymentType: studentBaseSchema.paymentType,
-  installments: studentBaseSchema.installments,
-  paymentStatus: studentBaseSchema.paymentStatus,
+  
   // Adicionar campos de data explicitamente
   paymentDate: z.union([
     z.string().optional().nullable()
@@ -175,7 +186,12 @@ const createStudentBaseSchema = z.object({
       })
       .transform(val => val ? new Date(val) : null),
     z.date().optional().nullable()
-  ])
+  ]),
+  
+  // Campos de cupom
+  couponCode: z.string().optional(),
+  discountAmount: z.number().optional(),
+  affiliateCommission: z.number().optional(),
 });
 
 // Adiciona refinamento de validação para verificar a compatibilidade entre status e data de pagamento
@@ -200,6 +216,75 @@ export const createStudentSchema = createStudentBaseSchema
   });
 
 /**
+ * Schema para adicionar cursos a um aluno existente
+ * Aqui não exigimos os campos básicos do aluno pois ele já existe
+ */
+export const addCoursesToStudentSchema = z.object({
+  // Campos de curso (pelo menos um dos dois deve ser fornecido)
+  courses: z.array(courseSchema).optional(),
+  courseId: z.number().int().positive().optional(),
+  courseModalityId: z.number().int().positive().optional(),
+  // Campos de valor
+  value: z.number().positive().optional(),
+  totalValue: z.number().positive().optional(),
+  // Campos de pagamento
+  paymentType: z.string().min(1, { message: 'Tipo de pagamento é obrigatório' })
+    .refine(val => [
+      'Dinheiro', 
+      'Cartão de Crédito', 
+      'Cartão de Débito', 
+      'Boleto Bancário', 
+      'PIX', 
+      'Transferência'
+    ].includes(val), {
+      message: 'Tipo de pagamento inválido'
+    }),
+  
+  installments: z.number().int().positive({ message: 'Número de parcelas deve ser um inteiro positivo' })
+    .or(
+      z.string().transform(val => Number.parseInt(val, 10))
+    )
+    .refine(val => !Number.isNaN(val) && val > 0 && val <= 12, { 
+      message: 'Número de parcelas deve ser um inteiro entre 1 e 12' 
+    }),
+  
+  paymentStatus: z.string().min(1, { message: 'Status de pagamento é obrigatório' })
+    .refine(val => ['Pago', 'Pendente', 'Parcial', 'Cancelado'].includes(val), {
+      message: 'Status de pagamento inválido. Deve ser: Pago, Pendente, Parcial ou Cancelado'
+    }),
+  paymentDate: z.union([
+    z.string().optional().nullable(),
+    z.date().optional().nullable()
+  ]),
+  paymentForecastDate: z.union([
+    z.string().optional().nullable(),
+    z.date().optional().nullable()
+  ]),
+  // Campos de cupom
+  couponCode: z.string().optional(),
+  discountAmount: z.number().optional(),
+  affiliateCommission: z.number().optional(),
+}).superRefine((data, ctx) => {
+  // Verificar se temos pelo menos um curso para adicionar
+  if ((!data.courses || data.courses.length === 0) && (!data.courseId || !data.courseModalityId)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'É necessário informar pelo menos um curso para adicionar',
+      path: ['courses']
+    });
+  }
+  
+  // Verificar se temos um valor total ou valor do curso
+  if (!data.value && !data.totalValue) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'É necessário informar o valor do curso ou valor total',
+      path: ['totalValue']
+    });
+  }
+});
+
+/**
  * Tipo auxiliar para lidar com esquemas Zod
  */
 type ZodSchema = z.ZodTypeAny;
@@ -220,12 +305,44 @@ const updateStudentBaseSchema = z.object({
   cnhNumber: studentBaseSchema.cnhNumber.optional(),
   cnhType: studentBaseSchema.cnhType.optional(),
   renach: studentBaseSchema.renach.optional(),
-  courseModalityId: studentBaseSchema.courseModalityId.optional(),
-  courseId: studentBaseSchema.courseId.optional(),
-  value: studentBaseSchema.value.optional(),
-  paymentType: studentBaseSchema.paymentType.optional(),
-  installments: studentBaseSchema.installments.optional(),
-  paymentStatus: studentBaseSchema.paymentStatus.optional(),
+  // Campos removidos do modelo Student:
+  // courseModalityId, courseId, value, paymentType, installments, paymentStatus, paymentDate, paymentForecastDate
+  // Novos campos para múltiplos cursos
+  courses: z.array(courseSchema).optional(),
+  totalValue: z.number().positive({ message: 'Valor total deve ser positivo' })
+    .or(
+      z.string().transform(val => Number.parseFloat(val.replace(',', '.')))
+    )
+    .refine(val => !Number.isNaN(val) && val > 0, { 
+      message: 'Valor total deve ser um número positivo' 
+    })
+    .optional(),
+  // Campos que agora são usados apenas para a criação de transações
+  paymentType: z.string().min(1, { message: 'Tipo de pagamento é obrigatório' })
+    .refine(val => [
+      'Dinheiro', 
+      'Cartão de Crédito', 
+      'Cartão de Débito', 
+      'Boleto Bancário', 
+      'PIX', 
+      'Transferência'
+    ].includes(val), {
+      message: 'Tipo de pagamento inválido'
+    }).optional(),
+  
+  installments: z.number().int().positive({ message: 'Número de parcelas deve ser um inteiro positivo' })
+    .or(
+      z.string().transform(val => Number.parseInt(val, 10))
+    )
+    .refine(val => !Number.isNaN(val) && val > 0 && val <= 12, { 
+      message: 'Número de parcelas deve ser um inteiro entre 1 e 12' 
+    }).optional(),
+  
+  paymentStatus: z.string().min(1, { message: 'Status de pagamento é obrigatório' })
+    .refine(val => ['Pago', 'Pendente', 'Parcial', 'Cancelado'].includes(val), {
+      message: 'Status de pagamento inválido. Deve ser: Pago, Pendente, Parcial ou Cancelado'
+    }).optional(),
+  
   paymentDate: z.union([
     z.string().optional().nullable()
       .refine(val => !val || /^\d{4}-\d{2}-\d{2}$/.test(val), {

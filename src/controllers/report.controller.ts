@@ -53,18 +53,47 @@ export const generateReport = async (req: Request, res: Response): Promise<Respo
             name: true,
             email: true
           }
+        },
+        transactions: {
+          include: {
+            courses: {
+              include: {
+                course: true,
+                courseModality: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 1
         }
       }
     });
     
     // Processa os resultados para o formato do relatório
-    const processedStudents = students.map(student => ({
-      ...student,
-      // Formata a data de pagamento única se existir
-      paymentDate: student.paymentDate ? student.paymentDate.toISOString().split('T')[0] : null,
-      paymentForecastDate: student.paymentForecastDate ? student.paymentForecastDate.toISOString().split('T')[0] : null,
-      age: calculateAge(student.birthDate)
-    }));
+    const processedStudents = students.map(student => {
+      // Obter dados da transação mais recente (se existir)
+      const latestTransaction = student.transactions && student.transactions.length > 0 
+        ? student.transactions.sort((a, b) => 
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] 
+        : null;
+      
+      return {
+        ...student,
+        // Usar dados da transação mais recente
+        paymentDate: latestTransaction?.paymentDate 
+          ? latestTransaction.paymentDate.toISOString().split('T')[0] 
+          : null,
+        paymentForecastDate: latestTransaction?.paymentForecastDate 
+          ? latestTransaction.paymentForecastDate.toISOString().split('T')[0] 
+          : null,
+        paymentStatus: latestTransaction?.paymentStatus || null,
+        paymentType: latestTransaction?.paymentType || null,
+        value: latestTransaction?.totalValue || null,
+        age: calculateAge(student.birthDate)
+      };
+    });
     
     // Calcula totais e estatísticas
     const totals = calculateTotals(processedStudents);
@@ -121,17 +150,47 @@ export const generateStatistics = async (req: Request, res: Response): Promise<R
             name: true,
             email: true
           }
+        },
+        transactions: {
+          include: {
+            courses: {
+              include: {
+                course: true,
+                courseModality: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 1
         }
       }
     });
     
     // Processa os resultados
-    const processedStudents = students.map(student => ({
-      ...student,
-      paymentDate: student.paymentDate ? student.paymentDate.toISOString().split('T')[0] : null,
-      paymentForecastDate: student.paymentForecastDate ? student.paymentForecastDate.toISOString().split('T')[0] : null,
-      age: calculateAge(student.birthDate)
-    }));
+    const processedStudents = students.map(student => {
+      // Obter dados da transação mais recente (se existir)
+      const latestTransaction = student.transactions && student.transactions.length > 0 
+        ? student.transactions.sort((a, b) => 
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] 
+        : null;
+      
+      return {
+        ...student,
+        // Usar dados da transação mais recente
+        paymentDate: latestTransaction?.paymentDate 
+          ? latestTransaction.paymentDate.toISOString().split('T')[0] 
+          : null,
+        paymentForecastDate: latestTransaction?.paymentForecastDate 
+          ? latestTransaction.paymentForecastDate.toISOString().split('T')[0] 
+          : null,
+        paymentStatus: latestTransaction?.paymentStatus || null,
+        paymentType: latestTransaction?.paymentType || null,
+        value: latestTransaction?.totalValue || null,
+        age: calculateAge(student.birthDate)
+      };
+    });
     
     // Calcula estatísticas gerais
     const overall = calculateOverallStatistics(processedStudents);
@@ -188,17 +247,47 @@ export const exportReport = async (req: Request, res: Response): Promise<Respons
             name: true,
             email: true
           }
+        },
+        transactions: {
+          include: {
+            courses: {
+              include: {
+                course: true,
+                courseModality: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 1
         }
       }
     });
     
     // Processa os resultados
-    const processedStudents = students.map(student => ({
-      ...student,
-      paymentDate: student.paymentDate ? student.paymentDate.toISOString().split('T')[0] : null,
-      paymentForecastDate: student.paymentForecastDate ? student.paymentForecastDate.toISOString().split('T')[0] : null,
-      age: calculateAge(student.birthDate)
-    }));
+    const processedStudents = students.map(student => {
+      // Obter dados da transação mais recente (se existir)
+      const latestTransaction = student.transactions && student.transactions.length > 0 
+        ? student.transactions.sort((a, b) => 
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] 
+        : null;
+      
+      return {
+        ...student,
+        // Usar dados da transação mais recente
+        paymentDate: latestTransaction?.paymentDate 
+          ? latestTransaction.paymentDate.toISOString().split('T')[0] 
+          : null,
+        paymentForecastDate: latestTransaction?.paymentForecastDate 
+          ? latestTransaction.paymentForecastDate.toISOString().split('T')[0] 
+          : null,
+        paymentStatus: latestTransaction?.paymentStatus || null,
+        paymentType: latestTransaction?.paymentType || null,
+        value: latestTransaction?.totalValue || null,
+        age: calculateAge(student.birthDate)
+      };
+    });
     
     // Verifica o formato solicitado
     switch (format) {
@@ -241,11 +330,28 @@ const buildWhereClause = (
   // Filtros básicos
   if (filters.fullName) where.fullName = { contains: filters.fullName, mode: 'insensitive' };
   if (filters.cpf) where.cpf = { contains: filters.cpf };
-  if (filters.courseId) where.courseId = Number(filters.courseId);
-  if (filters.courseModalityId) where.courseModalityId = Number(filters.courseModalityId);
-  if (filters.paymentStatus) where.paymentStatus = filters.paymentStatus;
-  if (filters.paymentType) where.paymentType = filters.paymentType;
   if (filters.cnhType) where.cnhType = filters.cnhType;
+  
+  // Filtros de transação (agora precisamos usar a relação transactions)
+  if (filters.courseId || filters.courseModalityId || filters.paymentStatus || filters.paymentType) {
+    where.transactions = {
+      some: {
+        // Filtragem por campos de Transaction
+        ...(filters.paymentStatus && { paymentStatus: filters.paymentStatus }),
+        ...(filters.paymentType && { paymentType: filters.paymentType }),
+        
+        // Filtragem por relacionamento cursos nas transações
+        ...(filters.courseId || filters.courseModalityId ? {
+          courses: {
+            some: {
+              ...(filters.courseId && { courseId: Number(filters.courseId) }),
+              ...(filters.courseModalityId && { courseModalityId: Number(filters.courseModalityId) })
+            }
+          }
+        } : {})
+      }
+    };
+  }
   
   // Filtro de datas
   if (filters.startDate || filters.endDate) {
@@ -255,58 +361,18 @@ const buildWhereClause = (
     };
   }
   
-  // Filtro de faixa de valor
+  // Filtro de faixa de valor (agora usa transaction.totalValue)
   if (filters.minValue !== undefined || filters.maxValue !== undefined) {
-    where.value = {
-      ...(filters.minValue !== undefined && { gte: filters.minValue }),
-      ...(filters.maxValue !== undefined && { lte: filters.maxValue })
+    where.transactions = {
+      ...(where.transactions || {}),
+      some: {
+        ...(where.transactions?.some || {}),
+        totalValue: {
+          ...(filters.minValue !== undefined && { gte: filters.minValue }),
+          ...(filters.maxValue !== undefined && { lte: filters.maxValue })
+        }
+      }
     };
-  }
-  
-  // Filtro por idade (calcula a partir da data de nascimento)
-  if (filters.minAge !== undefined || filters.maxAge !== undefined) {
-    const now = new Date();
-    
-    if (filters.minAge !== undefined) {
-      const maxBirthDate = new Date();
-      maxBirthDate.setFullYear(now.getFullYear() - filters.minAge);
-      
-      // Prepara o filtro de data de nascimento
-      if (!where.birthDate) {
-        where.birthDate = {};
-      }
-      
-      // Adiciona condição de data máxima
-      if (where.birthDate && typeof where.birthDate === 'object') {
-        where.birthDate = {
-          ...where.birthDate as object,
-          lte: maxBirthDate
-        };
-      } else {
-        where.birthDate = { lte: maxBirthDate };
-      }
-    }
-    
-    if (filters.maxAge !== undefined) {
-      const minBirthDate = new Date();
-      minBirthDate.setFullYear(now.getFullYear() - filters.maxAge - 1);
-      minBirthDate.setDate(minBirthDate.getDate() + 1);
-      
-      // Prepara o filtro de data de nascimento
-      if (!where.birthDate) {
-        where.birthDate = {};
-      }
-      
-      // Adiciona condição de data mínima
-      if (where.birthDate && typeof where.birthDate === 'object') {
-        where.birthDate = {
-          ...where.birthDate as object,
-          gte: minBirthDate
-        };
-      } else {
-        where.birthDate = { gte: minBirthDate };
-      }
-    }
   }
   
   return where;
@@ -344,13 +410,17 @@ const buildOrderByClause = (
   
   switch (sortBy) {
     case 'value':
-      orderBy.value = sortOrder;
+      // Não é possível ordenar diretamente pelo valor, pois agora está em Transaction
+      // Ordenamos pela data de registro como fallback
+      orderBy.registrationDate = sortOrder;
       break;
     case 'fullName':
       orderBy.fullName = sortOrder;
       break;
     case 'paymentStatus':
-      orderBy.paymentStatus = sortOrder;
+      // Não é possível ordenar diretamente pelo status, pois agora está em Transaction
+      // Ordenamos pela data de registro como fallback
+      orderBy.registrationDate = sortOrder;
       break;
     case 'registrationDate':
     default:
@@ -367,16 +437,26 @@ const buildOrderByClause = (
 const calculateTotals = (students: Record<string, unknown>[]): ReportTotals => {
   const count = students.length;
   
-  // Calcula o valor total e médio
-  const totalValue = students.reduce((sum, student) => 
-    sum + (typeof student.value === 'number' ? student.value : 0), 0);
+  // Calcula o valor total e médio (agora usando transactions)
+  const totalValue = students.reduce((sum, student) => {
+    // Obter a transação mais recente
+    const transactions = student.transactions as Array<any> | undefined;
+    const latestTransaction = transactions && transactions.length > 0 ? transactions[0] : null;
+    const value = latestTransaction && typeof latestTransaction.totalValue === 'number' 
+      ? latestTransaction.totalValue 
+      : 0;
+    return sum + value;
+  }, 0);
   
   const avgValue = count > 0 ? totalValue / count : 0;
   
   // Conta o total por status de pagamento
   const paymentStatusCounts: Record<string, number> = {};
   students.forEach(student => {
-    const status = student.paymentStatus as string;
+    // Obter status da transação mais recente
+    const transactions = student.transactions as Array<any> | undefined;
+    const latestTransaction = transactions && transactions.length > 0 ? transactions[0] : null;
+    const status = latestTransaction?.paymentStatus as string;
     if (status) {
       paymentStatusCounts[status] = (paymentStatusCounts[status] || 0) + 1;
     }
@@ -385,10 +465,18 @@ const calculateTotals = (students: Record<string, unknown>[]): ReportTotals => {
   // Conta o total por modalidade de curso
   const courseModalityIdCounts: Record<string, number> = {};
   students.forEach(student => {
-    const courseModalityId = student.courseModalityId as number;
-    if (courseModalityId) {
-      const key = courseModalityId.toString();
-      courseModalityIdCounts[key] = (courseModalityIdCounts[key] || 0) + 1;
+    // Verificar se há transação com cursos
+    const transactions = student.transactions as Array<any> | undefined;
+    if (transactions && transactions.length > 0) {
+      const courses = transactions[0].courses as Array<any> | undefined;
+      if (courses && courses.length > 0) {
+        courses.forEach(course => {
+          if (course.courseModalityId) {
+            const key = course.courseModalityId.toString();
+            courseModalityIdCounts[key] = (courseModalityIdCounts[key] || 0) + 1;
+          }
+        });
+      }
     }
   });
   
@@ -419,7 +507,10 @@ const groupResults = (students: Record<string, unknown>[], groupBy: string): Gro
     
     switch (groupBy) {
       case 'paymentStatus':
-        groupKey = student.paymentStatus as string;
+        // Obter status da transação mais recente
+        const transactions = student.transactions as Array<any> | undefined;
+        const latestTransaction = transactions && transactions.length > 0 ? transactions[0] : null;
+        groupKey = latestTransaction?.paymentStatus as string || 'Pendente';
         groupLabels = {
           'Pago': 'Pagos',
           'Pendente': 'Pendentes',
@@ -429,17 +520,34 @@ const groupResults = (students: Record<string, unknown>[], groupBy: string): Gro
         break;
         
       case 'courseModalityId':
-        groupKey = (student.courseModalityId as number).toString();
+        // Obter modalidade da transação mais recente
+        const transactionsModality = student.transactions as Array<any> | undefined;
+        let modalityId = '';
+        if (transactionsModality && transactionsModality.length > 0 && 
+            transactionsModality[0].courses && transactionsModality[0].courses.length > 0) {
+          modalityId = transactionsModality[0].courses[0].courseModalityId?.toString() || '';
+        }
+        groupKey = modalityId || 'sem-modalidade';
         // Labels serão preenchidos posteriormente com nomes das modalidades
         break;
         
       case 'courseId':
-        groupKey = (student.courseId as number).toString();
+        // Obter curso da transação mais recente
+        const transactionsCourse = student.transactions as Array<any> | undefined;
+        let courseId = '';
+        if (transactionsCourse && transactionsCourse.length > 0 && 
+            transactionsCourse[0].courses && transactionsCourse[0].courses.length > 0) {
+          courseId = transactionsCourse[0].courses[0].courseId?.toString() || '';
+        }
+        groupKey = courseId || 'sem-curso';
         // Labels serão preenchidos posteriormente com nomes dos cursos
         break;
         
       case 'paymentType':
-        groupKey = student.paymentType as string;
+        // Obter tipo de pagamento da transação mais recente
+        const transactionsPayment = student.transactions as Array<any> | undefined;
+        const latestTrans = transactionsPayment && transactionsPayment.length > 0 ? transactionsPayment[0] : null;
+        groupKey = latestTrans?.paymentType as string || 'Desconhecido';
         groupLabels = {
           'Dinheiro': 'Dinheiro',
           'Cartão de Crédito': 'Cartão de Crédito',
@@ -505,8 +613,13 @@ const groupResults = (students: Record<string, unknown>[], groupBy: string): Gro
     // Adiciona o item ao grupo
     grouped[groupKey].items.push(student);
     
-    // Soma o valor
-    grouped[groupKey].totalValue += typeof student.value === 'number' ? student.value : 0;
+    // Soma o valor (da transação mais recente)
+    const transactions = student.transactions as Array<any> | undefined;
+    const latestTransaction = transactions && transactions.length > 0 ? transactions[0] : null;
+    const value = latestTransaction && typeof latestTransaction.totalValue === 'number' 
+      ? latestTransaction.totalValue 
+      : 0;
+    grouped[groupKey].totalValue += value;
   }
   
   // Converte o objeto agrupado em um array de resultados
@@ -530,29 +643,47 @@ const calculateOverallStatistics = (students: Record<string, unknown>[]): Statis
   const totalStudents = students.length;
   
   // Calcula o valor total e médio
-  const totalValue = students.reduce((sum, student) => 
-    sum + (typeof student.value === 'number' ? student.value : 0), 0);
+  const totalValue = students.reduce((sum, student) => {
+    // Obter a transação mais recente
+    const transactions = student.transactions as Array<any> | undefined;
+    const latestTransaction = transactions && transactions.length > 0 ? transactions[0] : null;
+    const value = latestTransaction && typeof latestTransaction.totalValue === 'number' 
+      ? latestTransaction.totalValue 
+      : 0;
+    return sum + value;
+  }, 0);
   
   const avgValue = totalStudents > 0 ? totalValue / totalStudents : 0;
   
   // Conta o total por status de pagamento
   const paymentStatusCounts: Record<string, number> = {};
-  students.forEach(student => {
-    const status = student.paymentStatus as string;
+  for (const student of students) {
+    // Obter status da transação mais recente
+    const transactions = student.transactions as Array<any> | undefined;
+    const latestTransaction = transactions && transactions.length > 0 ? transactions[0] : null;
+    const status = latestTransaction?.paymentStatus as string;
     if (status) {
       paymentStatusCounts[status] = (paymentStatusCounts[status] || 0) + 1;
     }
-  });
+  }
   
   // Conta o total por modalidade de curso
   const courseModalityIdCounts: Record<string, number> = {};
-  students.forEach(student => {
-    const courseModalityId = student.courseModalityId as number;
-    if (courseModalityId) {
-      const key = courseModalityId.toString();
-      courseModalityIdCounts[key] = (courseModalityIdCounts[key] || 0) + 1;
+  for (const student of students) {
+    // Verificar se há transação com cursos
+    const transactions = student.transactions as Array<any> | undefined;
+    if (transactions && transactions.length > 0) {
+      const courses = transactions[0].courses as Array<any> | undefined;
+      if (courses && courses.length > 0) {
+        for (const course of courses) {
+          if (course.courseModalityId) {
+            const key = course.courseModalityId.toString();
+            courseModalityIdCounts[key] = (courseModalityIdCounts[key] || 0) + 1;
+          }
+        }
+      }
     }
-  });
+  }
   
   return {
     totalStudents,
@@ -578,7 +709,14 @@ const calculatePeriodStatistics = (students: Record<string, unknown>[]): Statist
     }
     
     periodStats[period].count += 1;
-    periodStats[period].totalValue += student.value as number;
+    
+    // Obter valor da transação mais recente
+    const transactions = student.transactions as Array<any> | undefined;
+    const latestTransaction = transactions && transactions.length > 0 ? transactions[0] : null;
+    const value = latestTransaction && typeof latestTransaction.totalValue === 'number' 
+      ? latestTransaction.totalValue 
+      : 0;
+    periodStats[period].totalValue += value;
   }
   
   return Object.entries(periodStats).map(([period, stats]) => ({
@@ -649,7 +787,7 @@ const handleCSVExport = (res: Response, students: Record<string, unknown>[]): Re
     { field: 'email', header: 'Email' },
     { field: 'birthDate', header: 'Data de Nascimento', format: (value) => value ? new Date(value as string).toLocaleDateString('pt-BR') : '' },
     { field: 'cnhNumber', header: 'Número CNH' },
-    { field: 'cnhType', header: 'Tipo CNH' },
+    { field: 'cnhType', header: 'Categoria CNH' },
     { field: 'courseModalityId', header: 'Modalidade de Curso ID' },
     { field: 'courseId', header: 'Curso ID' },
     { field: 'value', header: 'Valor', format: (value) => formatValue(value as number) },
