@@ -1,0 +1,12 @@
+/**
+ * DEPRECATED: Este script foi usado para a migração inicial e não é mais necessário.
+ * Os campos mencionados neste script já foram removidos do modelo Student na refatoração de 2024-07-17.
+ * 
+ * Script para migração da tabela Student.
+ * Este script cria transações para todos os alunos que ainda não as possuem,
+ * movendo os dados de curso e pagamento da tabela Student para Transaction.
+ */
+
+// Este script não faz mais nada, pois a migração já foi concluída
+console.log('Este script está obsoleto e foi substituído pela migração Prisma.');
+console.log('A refatoração do modelo Student já foi concluída em 2024-07-17.'); 

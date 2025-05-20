@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 import type { CreateStudentInput, UpdateStudentInput } from '../models/student.model';
 import { handleError, AppError } from '../utils/errorHandler';
-import { createStudentSchema, addCoursesToStudentSchema } from '../models/schemas/student.schema';
+import { createStudentSchema, addCoursesToStudentSchema, updateStudentBasicSchema } from '../models/schemas/student.schema';
 
 // Interface para uso no mapeamento de cursos
 interface CourseInput {
@@ -37,6 +37,25 @@ export const createStudent = async (req: Request, res: Response): Promise<Respon
       return res.status(401).json({
         error: 'Usuário não autenticado',
         message: 'É necessário estar autenticado para criar um estudante'
+      });
+    }
+
+    // Verificar se já existe um estudante com este CPF que tenha transações pendentes
+    const existingStudentWithCPF = await prisma.student.findFirst({
+      where: { cpf: studentData.cpf },
+      include: {
+        transactions: {
+          where: { paymentStatus: 'Pendente' }
+        }
+      }
+    });
+
+    if (existingStudentWithCPF && existingStudentWithCPF.transactions.length > 0) {
+      return res.status(400).json({
+        error: 'Transação pendente existente',
+        message: 'Já existe um aluno com este CPF que possui uma transação pendente. Resolva a transação pendente antes de criar um novo registro.',
+        existingStudentId: existingStudentWithCPF.id,
+        pendingTransactions: existingStudentWithCPF.transactions
       });
     }
 
@@ -330,6 +349,22 @@ export const addCoursesToStudent = async (req: Request, res: Response): Promise<
       return res.status(404).json({
         error: 'Estudante não encontrado',
         message: 'O estudante com o ID fornecido não foi encontrado'
+      });
+    }
+    
+    // Verificar se o aluno já possui transações pendentes
+    const pendingTransactions = await prisma.transaction.findMany({
+      where: { 
+        studentId: studentId,
+        paymentStatus: 'Pendente'
+      }
+    });
+    
+    if (pendingTransactions.length > 0) {
+      return res.status(400).json({
+        error: 'Transação pendente existente',
+        message: 'Este aluno já possui uma transação pendente. Resolva a transação pendente antes de adicionar novos cursos.',
+        pendingTransactions: pendingTransactions
       });
     }
     
@@ -1126,5 +1161,111 @@ export const executeMigration = async () => {
     console.log("Migração executada com sucesso");
   } catch (error) {
     console.error("Erro ao executar migração:", error);
+  }
+};
+
+/**
+ * Atualiza apenas os dados básicos de um aluno (sem cursos ou transações)
+ */
+export const updateStudentBasicInfo = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const { id } = req.params;
+    const studentData = req.body;
+
+    // Validação do schema de dados básicos
+    const validation = updateStudentBasicSchema.safeParse(studentData);
+    if (!validation.success) {
+      return res.status(400).json({
+        error: 'Dados de corpo da requisição inválidos',
+        details: validation.error.format()
+      });
+    }
+
+    // Validação manual do ID
+    if (!id || Number.isNaN(Number.parseInt(id, 10))) {
+      return res.status(400).json({ 
+        error: 'ID inválido', 
+        message: 'O ID do aluno precisa ser um número válido'
+      });
+    }
+
+    // Verificar se o usuário está autenticado
+    const userId = req.user && req.user.userId;
+    
+    if (!userId) {
+      return res.status(401).json({
+        error: 'Usuário não autenticado',
+        message: 'É necessário estar autenticado para atualizar um estudante'
+      });
+    }
+
+    // Verificar se o aluno existe
+    const existingStudent = await prisma.student.findUnique({
+      where: { id: Number.parseInt(id, 10) }
+    });
+
+    if (!existingStudent) {
+      return res.status(404).json({ 
+        error: 'Aluno não encontrado', 
+        message: 'Não foi possível encontrar um aluno com o ID informado'
+      });
+    }
+
+    // Verificar permissões (apenas admin e o criador podem atualizar)
+    if ((!req.user || req.user.role !== 'ADMIN') && existingStudent.userId !== userId) {
+      return res.status(403).json({
+        error: 'Permissão negada',
+        message: 'Você não tem permissão para atualizar este aluno'
+      });
+    }
+
+    // Converter datas para o formato correto
+    let birthDate = existingStudent.birthDate;
+
+    if (studentData.birthDate !== undefined) {
+      birthDate = studentData.birthDate ? new Date(studentData.birthDate) : null;
+    }
+
+    // Atualiza apenas os dados básicos do aluno
+    const updatedStudent = await prisma.student.update({
+      where: { id: Number.parseInt(id, 10) },
+      data: {
+        fullName: studentData.fullName,
+        ddd: studentData.ddd,
+        phone: studentData.phone,
+        email: studentData.email,
+        birthDate,
+        cnhNumber: studentData.cnhNumber,
+        cnhType: studentData.cnhType,
+        renach: studentData.renach,
+      },
+      include: {
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
+        transactions: {
+          include: {
+            courses: {
+              include: {
+                course: true,
+                courseModality: true
+              }
+            },
+            coupon: true
+          }
+        }
+      }
+    });
+
+    return res.status(200).json({
+      message: 'Dados básicos do aluno atualizados com sucesso',
+      student: updatedStudent
+    });
+  } catch (error) {
+    return handleError(error, res);
   }
 }; 

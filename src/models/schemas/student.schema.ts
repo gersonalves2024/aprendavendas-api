@@ -203,6 +203,15 @@ const validatePaymentDate = (data: { paymentStatus?: string; paymentDate?: Date 
   return true;
 };
 
+// Valida que previsão de pagamento é obrigatória para status Pendente
+const validatePaymentForecastDate = (data: { paymentStatus?: string; paymentForecastDate?: Date | null }) => {
+  if (data.paymentStatus === 'Pendente' && 
+     (!data.paymentForecastDate || data.paymentForecastDate === null)) {
+    return false;
+  }
+  return true;
+};
+
 // Cria o schema final com validação personalizada
 export const createStudentSchema = createStudentBaseSchema
   .superRefine((data, ctx) => {
@@ -211,6 +220,14 @@ export const createStudentSchema = createStudentBaseSchema
         code: z.ZodIssueCode.custom,
         message: 'Alunos com status Pendente ou Cancelado não podem ter data de pagamento',
         path: ['paymentDate']
+      });
+    }
+
+    if (!validatePaymentForecastDate(data)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Para transações com status Pendente, é obrigatório informar a previsão de pagamento',
+        path: ['paymentForecastDate']
       });
     }
   });
@@ -282,12 +299,39 @@ export const addCoursesToStudentSchema = z.object({
       path: ['totalValue']
     });
   }
+
+  // Validar a previsão de pagamento para status Pendente
+  if (data.paymentStatus === 'Pendente' && (!data.paymentForecastDate || data.paymentForecastDate === null)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Para transações com status Pendente, é obrigatório informar a previsão de pagamento',
+      path: ['paymentForecastDate']
+    });
+  }
 });
 
 /**
  * Tipo auxiliar para lidar com esquemas Zod
  */
 type ZodSchema = z.ZodTypeAny;
+
+/**
+ * Schema para atualização apenas dos dados básicos do aluno 
+ * (sem cursos ou informações de pagamento)
+ */
+export const updateStudentBasicSchema = z.object({
+  fullName: studentBaseSchema.fullName.optional(),
+  ddd: studentBaseSchema.ddd.optional(),
+  phone: studentBaseSchema.phone.optional(),
+  email: studentBaseSchema.email.optional(),
+  birthDate: z.union([
+    z.string().optional().nullable(),
+    z.date().optional().nullable()
+  ]),
+  cnhNumber: studentBaseSchema.cnhNumber.optional(),
+  cnhType: studentBaseSchema.cnhType.optional(),
+  renach: studentBaseSchema.renach.optional(),
+});
 
 /**
  * Schema para atualização de aluno (todos os campos são opcionais)
@@ -383,6 +427,18 @@ export const updateStudentSchema = updateStudentBaseSchema
           code: z.ZodIssueCode.custom,
           message: 'Alunos com status Pendente ou Cancelado não podem ter data de pagamento',
           path: ['paymentDate']
+        });
+      }
+    }
+
+    // Validar que transações com status Pendente devem ter previsão de pagamento
+    if (data.paymentStatus === 'Pendente') {
+      // Se não forneceu paymentForecastDate e não existe no registro atual
+      if (!data.paymentForecastDate || data.paymentForecastDate === null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Para transações com status Pendente, é obrigatório informar a previsão de pagamento',
+          path: ['paymentForecastDate']
         });
       }
     }

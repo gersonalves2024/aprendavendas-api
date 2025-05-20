@@ -97,6 +97,13 @@ export const createTransaction = async (req: Request, res: Response): Promise<Re
     }
     
     // Criar a transação
+    // Garantir que a data de pagamento seja a data atual quando o status for Pago
+    const currentDate = new Date();
+    const paymentDate = 
+      transactionData.paymentStatus === 'Pago' 
+        ? currentDate 
+        : (transactionData.paymentDate ? new Date(transactionData.paymentDate) : null);
+    
     const transaction = await prisma.transaction.create({
       data: {
         studentId: transactionData.studentId,
@@ -104,7 +111,7 @@ export const createTransaction = async (req: Request, res: Response): Promise<Re
         paymentType: transactionData.paymentType,
         installments: transactionData.installments,
         paymentStatus: transactionData.paymentStatus,
-        paymentDate: transactionData.paymentDate ? new Date(transactionData.paymentDate) : null,
+        paymentDate: paymentDate,
         paymentForecastDate: transactionData.paymentForecastDate ? new Date(transactionData.paymentForecastDate) : null,
         createdById: req.user.userId,
         couponId: couponId,
@@ -418,12 +425,20 @@ export const updateTransaction = async (req: Request, res: Response): Promise<Re
     }
     
     // Preparar dados de atualização
+    const currentDate = new Date();
+    
+    // Garantir que a data de pagamento seja a data atual quando o status for Pago
+    const paymentDate = 
+      transactionData.paymentStatus === 'Pago' 
+        ? currentDate 
+        : (transactionData.paymentDate ? new Date(transactionData.paymentDate) : undefined);
+    
     const updateData: any = {
       totalValue: transactionData.totalValue,
       paymentType: transactionData.paymentType,
       installments: transactionData.installments,
       paymentStatus: transactionData.paymentStatus,
-      paymentDate: transactionData.paymentDate ? new Date(transactionData.paymentDate) : undefined,
+      paymentDate: paymentDate,
       paymentForecastDate: transactionData.paymentForecastDate ? new Date(transactionData.paymentForecastDate) : undefined,
       couponId: couponId,
       discountAmount: transactionData.discountAmount

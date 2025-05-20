@@ -110,9 +110,12 @@ export const generatePaymentLink = async (req: Request, res: Response): Promise<
       availablePaymentMethods = '3,4,5,16'; // Cartões de crédito
     }
 
-    // Gerar número de pedido único (CPF + timestamp)
-    const timestamp = new Date().getTime();
-    const orderNumber = `${student.cpf.replace(/[^\d]/g, '')}${timestamp}`;
+    // Gerar número de pedido único (8 primeiros dígitos do CPF + código da transação)
+    // Pegar somente os 8 primeiros dígitos do CPF (removendo qualquer formato como ponto e traço)
+    const cpfFirstEightDigits = student.cpf.replace(/[^\d]/g, '').substring(0, 8);
+    // Código da transação
+    const transactionCode = transaction?.id.toString() || '0';
+    const orderNumber = `${cpfFirstEightDigits}${transactionCode}`;
 
     // Se tiver transação específica, usar seus dados
     let finalValue, description;

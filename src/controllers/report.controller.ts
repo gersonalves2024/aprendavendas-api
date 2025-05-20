@@ -873,4 +873,140 @@ const formatCPF = (cpf: string): string => {
  */
 const formatValue = (value: number): string => {
   return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+/**
+ * Gera estatísticas para o dashboard com dados detalhados sobre transações
+ */
+export const getDashboardStats = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    // Extrair os parâmetros de consulta
+    const { startDate, endDate } = req.query;
+    
+    // Definir datas padrão para o mês atual se não fornecidas
+    const now = new Date();
+    const currentStartDate = startDate ? new Date(String(startDate)) : new Date(now.getFullYear(), now.getMonth(), 1);
+    const currentEndDate = endDate ? new Date(String(endDate)) : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    
+    // Obter todas as transações no período
+    const transactions = await prisma.transaction.findMany({
+      where: {
+        createdAt: {
+          gte: currentStartDate,
+          lte: currentEndDate,
+        }
+      },
+      include: {
+        courses: {
+          include: {
+            course: true,
+            courseModality: true
+          }
+        },
+        student: {
+          select: {
+            id: true,
+            fullName: true,
+            cpf: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+    
+    // Estatísticas iniciais
+    const stats = {
+      // Estatísticas de status de pagamento
+      statusCount: {
+        total: transactions.length,
+        pagos: 0,
+        pendentes: 0,
+        cancelados: 0
+      },
+      
+      // Estatísticas de valores
+      values: {
+        valorTotal: 0,
+        valorPago: 0,
+        valorPendente: 0,
+        valorCancelado: 0
+      },
+      
+      // Estatísticas por curso
+      courseStats: [] as Array<{
+        courseId: number;
+        courseName: string;
+        modalityId: number;
+        modalityName: string;
+        count: number;
+        totalValue: number;
+      }>,
+      
+      // Período
+      period: {
+        startDate: currentStartDate,
+        endDate: currentEndDate
+      }
+    };
+    
+    // Coletar estatísticas das transações
+    for (const transaction of transactions) {
+      // Incrementar contagem por status
+      switch (transaction.paymentStatus) {
+        case 'Pago':
+          stats.statusCount.pagos++;
+          stats.values.valorPago += transaction.totalValue;
+          break;
+        case 'Pendente':
+          stats.statusCount.pendentes++;
+          stats.values.valorPendente += transaction.totalValue;
+          break;
+        case 'Cancelado':
+          stats.statusCount.cancelados++;
+          stats.values.valorCancelado += transaction.totalValue;
+          break;
+      }
+      
+      // Incrementar valor total
+      stats.values.valorTotal += transaction.totalValue;
+      
+      // Processar estatísticas por curso - APENAS para transações com status "Pago"
+      if (transaction.paymentStatus === 'Pago') {
+        for (const course of transaction.courses) {
+          const existingCourseIndex = stats.courseStats.findIndex(
+            c => c.courseId === course.courseId && c.modalityId === course.courseModalityId
+          );
+          
+          if (existingCourseIndex >= 0) {
+            // Curso já existe nas estatísticas, atualizar contagem e valor
+            stats.courseStats[existingCourseIndex].count++;
+            
+            // Dividir valor da transação pela quantidade de cursos para uma estimativa
+            const valuePerCourse = transaction.totalValue / transaction.courses.length;
+            stats.courseStats[existingCourseIndex].totalValue += valuePerCourse;
+          } else {
+            // Adicionar novo curso às estatísticas
+            const valuePerCourse = transaction.totalValue / transaction.courses.length;
+            stats.courseStats.push({
+              courseId: course.courseId,
+              courseName: course.course.name,
+              modalityId: course.courseModalityId,
+              modalityName: course.courseModality.name,
+              count: 1,
+              totalValue: valuePerCourse
+            });
+          }
+        }
+      }
+    }
+    
+    // Ordenar cursos por quantidade, do maior para o menor
+    stats.courseStats.sort((a, b) => b.count - a.count);
+    
+    return res.status(200).json(stats);
+  } catch (error) {
+    return handleError(error, res);
+  }
 }; 

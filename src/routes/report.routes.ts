@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { 
   generateReport, 
   generateStatistics, 
-  exportReport 
+  exportReport,
+  getDashboardStats
 } from '../controllers/report.controller';
 import { 
   authenticate, 
@@ -29,5 +30,8 @@ router.get('/statistics', validate(reportFiltersSchema, 'query'), generateStatis
 
 // Rota para exportação de relatórios
 router.get('/export', validate(reportExportSchema, 'query'), exportReport);
+
+// Obter estatísticas do dashboard
+router.get('/dashboard', getDashboardStats);
 
 export default router; 

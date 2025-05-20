@@ -6,7 +6,8 @@ import {
   updateStudent, 
   deleteStudent,
   addCoursesToStudent,
-  deleteTransaction
+  deleteTransaction,
+  updateStudentBasicInfo
 } from '../controllers/student.controller';
 import { 
   authenticate, 
@@ -21,7 +22,8 @@ import {
   updateStudentSchema, 
   paginationSchema, 
   filtersSchema,
-  addCoursesToStudentSchema
+  addCoursesToStudentSchema,
+  updateStudentBasicSchema
 } from '../models/schemas/student.schema';
 import { Role } from '../models/user.model';
 
@@ -40,7 +42,10 @@ router.get('/', validate(paginationSchema, 'query'), validate(filtersSchema, 'qu
 // Vendedores e afiliados podem ver detalhes de alunos (com verificação de propriedade no controller)
 router.get('/:id', getStudentById);
 
-// Apenas vendedores podem atualizar alunos
+// Atualização de dados básicos do aluno (sem transações)
+router.put('/:id/basic', requireProfile([Role.SELLER]), validate(updateStudentBasicSchema), updateStudentBasicInfo);
+
+// Atualização completa do aluno (incluindo transações)
 router.put('/:id', requireProfile([Role.SELLER]), validate(updateStudentSchema), updateStudent);
 
 // Adicionar nova transação/cursos a um aluno existente
