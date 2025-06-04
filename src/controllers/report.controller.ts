@@ -1,6 +1,5 @@
 import type { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-import type { Prisma } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import type { ReportFilters } from '../models/schemas/report.schema';
 import type { 
   ReportResult, 
@@ -880,6 +879,11 @@ const formatValue = (value: number): string => {
  */
 export const getDashboardStats = async (req: Request, res: Response): Promise<Response> => {
   try {
+    // Verifica se o usuário está autenticado
+    if (!req.user) {
+      throw new AppError('Você precisa estar autenticado para realizar esta operação', 401, undefined, 'AUTH_REQUIRED');
+    }
+
     // Extrair os parâmetros de consulta
     const { startDate, endDate } = req.query;
     
@@ -888,14 +892,24 @@ export const getDashboardStats = async (req: Request, res: Response): Promise<Re
     const currentStartDate = startDate ? new Date(String(startDate)) : new Date(now.getFullYear(), now.getMonth(), 1);
     const currentEndDate = endDate ? new Date(String(endDate)) : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
     
+    // Filtro para transações - vendedores só podem ver suas próprias transações
+    const whereClause: Prisma.TransactionWhereInput = {
+      createdAt: {
+        gte: currentStartDate,
+        lte: currentEndDate,
+      }
+    };
+
+    // Se não for admin, adicionar filtro de usuário
+    if (req.user.role !== 'ADMIN') {
+      whereClause.student = {
+        userId: req.user.userId
+      };
+    }
+    
     // Obter todas as transações no período
     const transactions = await prisma.transaction.findMany({
-      where: {
-        createdAt: {
-          gte: currentStartDate,
-          lte: currentEndDate,
-        }
-      },
+      where: whereClause,
       include: {
         courses: {
           include: {

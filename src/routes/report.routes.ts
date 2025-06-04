@@ -32,6 +32,7 @@ router.get('/statistics', validate(reportFiltersSchema, 'query'), generateStatis
 router.get('/export', validate(reportExportSchema, 'query'), exportReport);
 
 // Obter estatísticas do dashboard
+// Não usamos requireAdmin para permitir que vendedores vejam seus próprios dados
 router.get('/dashboard', getDashboardStats);
 
 export default router; 

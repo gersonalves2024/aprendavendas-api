@@ -141,7 +141,10 @@ const createStudentBaseSchema = z.object({
     .optional(),
   
   // Campo para identificar aluno existente ao adicionar novos cursos
-  existingStudentId: z.number().int().positive().optional(),
+  // Este campo é opcional e só deve ser usado quando adicionando cursos a um aluno existente
+  existingStudentId: z.number().int().positive().optional()
+    .or(z.null()) // Permitir explicitamente null
+    .optional(), // Garantir que é realmente opcional
   
   // Campos de transação (não são mais parte do modelo Student)
   paymentType: z.string().min(1, { message: 'Tipo de pagamento é obrigatório' })

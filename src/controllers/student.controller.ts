@@ -31,7 +31,7 @@ export const createStudent = async (req: Request, res: Response): Promise<Respon
     const studentData = validation.data;
 
     // Se não tiver userId no request body, usa o ID do usuário autenticado
-    const userId = req.user && req.user.userId;
+    const userId = req.user?.userId;
     
     if (!userId) {
       return res.status(401).json({
@@ -94,194 +94,175 @@ export const createStudent = async (req: Request, res: Response): Promise<Respon
     console.log('Data de pagamento convertida:', paymentDate);
     console.log('Previsão de pagamento convertida:', paymentForecastDate);
 
-    // Usar uma transação para garantir que ambas as operações (criar aluno e criar transação) sejam atômicas
-    const result = await prisma.$transaction(async (prismaTransaction) => {
-      // Variáveis para processar cupom
-      let couponId = null;
+    // SOLUÇÃO 3: Buscar e validar o cupom ANTES da transação, mas só usar dentro dela
+    let cupomValidado = null;
+    if (studentData.couponCode) {
+      try {
+        // Buscar cupom pelo código primeiro
+        let coupon = await prisma.coupon.findUnique({
+          where: { code: studentData.couponCode },
+          include: {
+            user: true,
+          },
+        });
 
-      // Processar cupom se fornecido DENTRO da transação
-      if (studentData.couponCode) {
-        try {
-          // Buscar cupom pelo código
-          let coupon = await prismaTransaction.coupon.findUnique({
-            where: { code: studentData.couponCode },
+        // Se não encontrou pelo código, tentar pelo nome personalizado
+        if (!coupon) {
+          console.log(`Cupom não encontrado pelo código "${studentData.couponCode}", tentando buscar por nome personalizado`);
+          
+          const couponsWithCustomName = await prisma.coupon.findMany({
+            where: { 
+              customName: {
+                equals: studentData.couponCode,
+                mode: 'insensitive'
+              },
+              active: true 
+            },
             include: {
               user: true,
             },
           });
 
-          // Se não encontrou pelo código, tentar encontrar pelo nome personalizado
-          if (!coupon) {
-            console.log(`Cupom não encontrado pelo código "${studentData.couponCode}", tentando buscar por nome personalizado`);
-            
-            // Usar o Prisma para fazer uma busca case-insensitive
-            const couponsWithCustomName = await prismaTransaction.coupon.findMany({
-              where: { 
-                customName: {
-                  equals: studentData.couponCode,
-                  mode: 'insensitive' // Busca case-insensitive
-                },
-                active: true 
-              },
-              include: {
-                user: true,
-              },
-            });
+          console.log(`Encontrados ${couponsWithCustomName.length} cupons com o nome personalizado "${studentData.couponCode}":`, 
+            couponsWithCustomName.map(c => ({ id: c.id, code: c.code, customName: c.customName })));
 
-            console.log(`Encontrados ${couponsWithCustomName.length} cupons com o nome personalizado "${studentData.couponCode}":`, 
-              couponsWithCustomName.map(c => ({ id: c.id, code: c.code, customName: c.customName })));
-
-            // Se encontrou exatamente um cupom com o nome personalizado, usar esse
-            if (couponsWithCustomName.length === 1) {
-              console.log(`Usando cupom encontrado por nome personalizado: ${couponsWithCustomName[0].code}`);
-              coupon = couponsWithCustomName[0];
+          // Se encontrou exatamente um cupom com o nome personalizado, usar esse
+          if (couponsWithCustomName.length === 1) {
+            console.log(`Usando cupom encontrado por nome personalizado: ${couponsWithCustomName[0].code}`);
+            coupon = couponsWithCustomName[0];
+          }
+          // Se encontrou mais de um, usar o primeiro ativo
+          else if (couponsWithCustomName.length > 1) {
+            const activeCoupon = couponsWithCustomName.find(c => c.active);
+            if (activeCoupon) {
+              console.log(`Encontrados múltiplos cupons, usando o primeiro ativo: ${activeCoupon.code}`);
+              coupon = activeCoupon;
             }
-            // Se encontrou mais de um, usar o primeiro ativo
-            else if (couponsWithCustomName.length > 1) {
-              const activeCoupon = couponsWithCustomName.find(c => c.active);
-              if (activeCoupon) {
-                console.log(`Encontrados múltiplos cupons, usando o primeiro ativo: ${activeCoupon.code}`);
-                coupon = activeCoupon;
+          }
+        }
+
+        // Realizar validações de cupom
+        if (!coupon) {
+          console.log('Cupom não encontrado. Continuando sem aplicar cupom.');
+        } 
+        else if (!coupon.active) {
+          console.log('Cupom inativo. Continuando sem aplicar cupom.');
+        }
+        else if (coupon.expirationDate && new Date() > new Date(coupon.expirationDate)) {
+          console.log('Cupom expirado. Continuando sem aplicar cupom.');
+        }
+        else if (coupon.usageLimit !== null && coupon.usageCount >= coupon.usageLimit) {
+          console.log('Limite de uso excedido. Continuando sem aplicar cupom.');
+        }
+        else {
+          // Tudo certo, armazenamos o cupom validado para uso dentro da transação
+          cupomValidado = coupon;
+          console.log(`Cupom ${studentData.couponCode} validado com sucesso. ID: ${coupon.id}`);
+          console.log(`Desconto: ${studentData.discountAmount}, Comissão: ${studentData.affiliateCommission}`);
+        }
+      } catch (couponError) {
+        console.error('Erro ao processar cupom (fora da transação):', couponError);
+        console.log('Continuando sem aplicar cupom devido ao erro.');
+      }
+    }
+
+    // Agora usar uma transação para garantir que ambas as operações (criar aluno e criar transação) sejam atômicas
+    try {
+      const result = await prisma.$transaction(async (prismaTransaction) => {
+        // 1. Criar o estudante com apenas dados pessoais, sem informações de curso ou pagamento
+        const newStudent = await prismaTransaction.student.create({
+          data: {
+            fullName: studentData.fullName,
+            ddd: studentData.ddd,
+            phone: studentData.phone,
+            email: studentData.email || null,
+            birthDate: birthDate,
+            cpf: studentData.cpf,
+            cnhNumber: studentData.cnhNumber || null,
+            cnhType: studentData.cnhType || null,
+            renach: studentData.renach || null,
+            userId: userId,
+          },
+          include: {
+            createdBy: {
+              select: {
+                id: true,
+                name: true,
+                email: true
               }
             }
           }
+        });
 
-          if (!coupon) {
-            throw new Error('Cupom não encontrado');
-          }
+        // 2. Sempre criar uma transação, independente se é múltiplos cursos ou não
+        // Preparar os cursos para a transação
+        const coursesForTransaction = studentData.courses && studentData.courses.length > 0 
+          ? studentData.courses 
+          : [{
+              courseId: studentData.courseId,
+              courseModalityId: studentData.courseModalityId
+            }];
 
-          if (!coupon.active) {
-            throw new Error('Cupom inativo');
-          }
-
-          // Verificar se o cupom está expirado
-          if (coupon.expirationDate && new Date() > new Date(coupon.expirationDate)) {
-            throw new Error('Cupom expirado');
-          }
-
-          // Verificar se o cupom atingiu o limite de uso
-          if (coupon.usageLimit !== null && coupon.usageCount >= coupon.usageLimit) {
-            throw new Error('Limite de uso excedido');
-          }
-
-          // Tudo certo, podemos usar o cupom
-          couponId = coupon.id;
-
-          console.log(`Cupom ${studentData.couponCode} aplicado com sucesso. ID: ${couponId}`);
-          console.log(`Desconto: ${studentData.discountAmount}, Comissão: ${studentData.affiliateCommission}`);
-        } catch (couponError) {
-          console.error('Erro ao processar cupom:', couponError);
-          throw couponError; // Propagar o erro para ser tratado no bloco catch externo
-        }
-      }
-
-      // 1. Criar o estudante com apenas dados pessoais, sem informações de curso ou pagamento
-      const newStudent = await prismaTransaction.student.create({
-        data: {
-          fullName: studentData.fullName,
-          ddd: studentData.ddd,
-          phone: studentData.phone,
-          email: studentData.email || null,
-          birthDate: birthDate,
-          cpf: studentData.cpf,
-          cnhNumber: studentData.cnhNumber || null,
-          cnhType: studentData.cnhType || null,
-          renach: studentData.renach || null,
-          userId: userId,
-        },
-        include: {
-          createdBy: {
-            select: {
-              id: true,
-              name: true,
-              email: true
+        // Verificar o perfil do usuário e forçar status como "Pendente" se for vendedor
+        const paymentStatus = req.user?.role === 'SELLER' ? 'Pendente' : studentData.paymentStatus;
+        
+        // Criar a transação dentro da mesma transação do Prisma para garantir atomicidade
+        // Usar o cupom validado previamente para evitar nova consulta
+        const transaction = await prismaTransaction.transaction.create({
+          data: {
+            studentId: newStudent.id,
+            totalValue: studentData.totalValue || studentData.value,
+            paymentType: studentData.paymentType,
+            installments: studentData.installments,
+            paymentStatus: paymentStatus,
+            paymentDate: paymentStatus === 'Pago' ? paymentDate : null, // Data de pagamento só se for Pago
+            paymentForecastDate: paymentForecastDate,
+            createdById: userId,
+            couponId: cupomValidado?.id || null, // Usar o cupom já validado, sem novas consultas
+            discountAmount: studentData.discountAmount,
+            // Criar os cursos associados à transação
+            courses: {
+              create: coursesForTransaction.map(course => ({
+                courseId: Number(course.courseId),
+                courseModalityId: Number(course.courseModalityId)
+              }))
+            }
+          },
+          include: {
+            courses: {
+              include: {
+                course: true,
+                courseModality: true
+              }
             }
           }
+        });
+
+        // Se temos um cupom válido, incrementamos o contador DENTRO da transação
+        // Isso garante atomicidade completa
+        if (cupomValidado) {
+          await prismaTransaction.coupon.update({
+            where: { id: cupomValidado.id },
+            data: { usageCount: { increment: 1 } },
+          });
+          console.log(`Contador de uso do cupom ${cupomValidado.id} incrementado com sucesso (dentro da transação).`);
         }
+
+        // Retornar os resultados
+        return { newStudent, transaction };
       });
 
-      // 2. Sempre criar uma transação, independente se é múltiplos cursos ou não
-      // Preparar os cursos para a transação
-      const coursesForTransaction = studentData.courses && studentData.courses.length > 0 
-        ? studentData.courses 
-        : [{
-            courseId: studentData.courseId,
-            courseModalityId: studentData.courseModalityId
-          }];
-
-      // Criar a transação dentro da mesma transação do Prisma para garantir atomicidade
-      const transaction = await prismaTransaction.transaction.create({
-        data: {
-          studentId: newStudent.id,
-          totalValue: studentData.totalValue || studentData.value,
-          paymentType: studentData.paymentType,
-          installments: studentData.installments,
-          paymentStatus: studentData.paymentStatus,
-          paymentDate: paymentDate,
-          paymentForecastDate: paymentForecastDate,
-          createdById: userId,
-          couponId: couponId,
-          discountAmount: studentData.discountAmount,
-          // Criar os cursos associados à transação
-          courses: {
-            create: coursesForTransaction.map(course => ({
-              courseId: Number(course.courseId),
-              courseModalityId: Number(course.courseModalityId)
-            }))
-          }
-        },
-        include: {
-          courses: {
-            include: {
-              course: true,
-              courseModality: true
-            }
-          }
-        }
+      return res.status(201).json({
+        message: 'Estudante cadastrado com sucesso',
+        student: result.newStudent,
+        transaction: result.transaction
       });
-
-      // Atualizar o contador de uso do cupom DENTRO da transação, se houver um cupom
-      if (couponId) {
-        await prismaTransaction.coupon.update({
-          where: { id: couponId },
-          data: { usageCount: { increment: 1 } },
-        });
-      }
-
-      return { newStudent, transaction };
-    });
-
-    return res.status(201).json({
-      message: 'Estudante cadastrado com sucesso',
-      student: result.newStudent,
-      transaction: result.transaction
-    });
-
-  } catch (error) {
-    // Converter erros customizados para uma resposta adequada
-    if (error instanceof Error) {
-      if (error.message === 'Cupom não encontrado') {
-        return res.status(404).json({
-          error: 'Cupom não encontrado',
-          message: 'O cupom informado não existe'
-        });
-      } else if (error.message === 'Cupom inativo') {
-        return res.status(400).json({
-          error: 'Cupom inativo',
-          message: 'Este cupom não está ativo'
-        });
-      } else if (error.message === 'Cupom expirado') {
-        return res.status(400).json({
-          error: 'Cupom expirado',
-          message: 'Este cupom já expirou'
-        });
-      } else if (error.message === 'Limite de uso excedido') {
-        return res.status(400).json({
-          error: 'Limite de uso excedido',
-          message: 'Este cupom já atingiu seu limite máximo de uso'
-        });
-      }
+    } catch (transactionError) {
+      console.error('Erro capturado:', transactionError);
+      return handleError(transactionError, res);
     }
+  } catch (error) {
+    console.error('Erro geral na criação de estudante:', error);
     return handleError(error, res);
   }
 };
@@ -331,7 +312,7 @@ export const addCoursesToStudent = async (req: Request, res: Response): Promise<
     const transactionData = validation.data;
     
     // Se não tiver userId no request body, usa o ID do usuário autenticado
-    const userId = req.user && req.user.userId;
+    const userId = req.user?.userId;
     
     if (!userId) {
       return res.status(401).json({
@@ -382,19 +363,19 @@ export const addCoursesToStudent = async (req: Request, res: Response): Promise<
     const paymentDate = transactionData.paymentDate ? new Date(transactionData.paymentDate) : null;
     const paymentForecastDate = transactionData.paymentForecastDate ? new Date(transactionData.paymentForecastDate) : null;
     
-    // Usar transação para garantir atomicidade das operações
-    const result = await prisma.$transaction(async (prismaTransaction) => {
-      // Processar cupom se fornecido DENTRO da transação
-      let couponId = null;
-      if (transactionData.couponCode) {
+    // SOLUÇÃO 3: Buscar e validar o cupom ANTES da transação, mas só usar dentro dela
+    let cupomValidado = null;
+    if (transactionData.couponCode) {
+      try {
         // Buscar cupom pelo código
-        let coupon = await prismaTransaction.coupon.findUnique({
+        let coupon = await prisma.coupon.findUnique({
           where: { code: transactionData.couponCode },
         });
 
         // Se não encontrou pelo código, tentar encontrar pelo nome personalizado
         if (!coupon) {
-          const couponsWithCustomName = await prismaTransaction.coupon.findMany({
+          console.log(`Cupom não encontrado pelo código "${transactionData.couponCode}", tentando buscar por nome personalizado`);
+          const couponsWithCustomName = await prisma.coupon.findMany({
             where: { 
               customName: {
                 equals: transactionData.couponCode,
@@ -404,94 +385,136 @@ export const addCoursesToStudent = async (req: Request, res: Response): Promise<
             }
           });
 
-          // Se encontrou algum cupom ativo com esse nome personalizado, usar o primeiro
-          if (couponsWithCustomName.length > 0) {
+          console.log(`Encontrados ${couponsWithCustomName.length} cupons com o nome personalizado "${transactionData.couponCode}"`);
+          
+          // Se encontrou exatamente um cupom com o nome personalizado, usar esse
+          if (couponsWithCustomName.length === 1) {
+            console.log(`Usando cupom encontrado por nome personalizado: ${couponsWithCustomName[0].code}`);
             coupon = couponsWithCustomName[0];
+          }
+          // Se encontrou mais de um, usar o primeiro ativo
+          else if (couponsWithCustomName.length > 1) {
+            const activeCoupon = couponsWithCustomName.find(c => c.active);
+            if (activeCoupon) {
+              console.log(`Encontrados múltiplos cupons, usando o primeiro ativo: ${activeCoupon.code}`);
+              coupon = activeCoupon;
+            }
           }
         }
 
-        // Se encontrou o cupom e ele está ativo, usar seu ID
-        if (coupon && coupon.active) {
-          couponId = coupon.id;
+        // Verificar se o cupom é válido antes de usar
+        if (!coupon) {
+          console.log('Cupom não encontrado. Continuando sem aplicar cupom.');
+        } 
+        else if (!coupon.active) {
+          console.log('Cupom inativo. Continuando sem aplicar cupom.');
         }
+        else if (coupon.expirationDate && new Date() > new Date(coupon.expirationDate)) {
+          console.log('Cupom expirado. Continuando sem aplicar cupom.');
+        }
+        else if (coupon.usageLimit !== null && coupon.usageCount >= coupon.usageLimit) {
+          console.log('Limite de uso excedido. Continuando sem aplicar cupom.');
+        }
+        else {
+          // Tudo certo, armazenamos o cupom validado para uso dentro da transação
+          cupomValidado = coupon;
+          console.log(`Cupom ${transactionData.couponCode} validado com sucesso. ID: ${coupon.id}`);
+          console.log(`Desconto: ${transactionData.discountAmount}`);
+        }
+      } catch (couponError) {
+        // Log do erro e continuar sem cupom
+        console.error('Erro ao processar cupom (fora da transação):', couponError);
+        console.log('Continuando sem aplicar cupom devido ao erro.');
       }
-      
-      // Criar uma nova transação para este estudante com os novos cursos
-      const transaction = await prismaTransaction.transaction.create({
-        data: {
-          studentId: existingStudent.id,
-          totalValue: transactionData.totalValue || transactionData.value || 0,
-          paymentType: transactionData.paymentType,
-          installments: transactionData.installments,
-          paymentStatus: transactionData.paymentStatus,
-          paymentDate: paymentDate,
-          paymentForecastDate: paymentForecastDate,
-          createdById: userId,
-          couponId: couponId,
-          discountAmount: transactionData.discountAmount,
-          // Criar os cursos associados à transação
-          courses: {
-            create: transactionData.courses?.map(course => ({
-              courseId: Number(course.courseId),
-              courseModalityId: Number(course.courseModalityId)
-            })) || [{
-              courseId: Number(transactionData.courseId),
-              courseModalityId: Number(transactionData.courseModalityId)
-            }]
-          }
-        },
-        include: {
-          courses: {
-            include: {
-              course: true,
-              courseModality: true
+    }
+    
+    // Verificar o perfil do usuário e forçar status como "Pendente" se for vendedor
+    const paymentStatus = req.user?.role === 'SELLER' ? 'Pendente' : transactionData.paymentStatus;
+    
+    // Agora usar uma transação para garantir atomicidade de todas as operações
+    try {
+      const transaction = await prisma.$transaction(async (prismaTransaction) => {
+        // Criar uma nova transação para este estudante com os novos cursos
+        const newTransaction = await prismaTransaction.transaction.create({
+          data: {
+            studentId: existingStudent.id,
+            totalValue: transactionData.totalValue || transactionData.value || 0,
+            paymentType: transactionData.paymentType,
+            installments: transactionData.installments,
+            paymentStatus: paymentStatus,
+            paymentDate: paymentStatus === 'Pago' ? paymentDate : null, // Data de pagamento só se for Pago
+            paymentForecastDate: paymentForecastDate,
+            createdById: userId,
+            couponId: cupomValidado?.id || null, // Usar o cupom já validado
+            discountAmount: transactionData.discountAmount,
+            // Criar os cursos associados à transação
+            courses: {
+              create: transactionData.courses?.map(course => ({
+                courseId: Number(course.courseId),
+                courseModalityId: Number(course.courseModalityId)
+              })) || [{
+                courseId: Number(transactionData.courseId),
+                courseModalityId: Number(transactionData.courseModalityId)
+              }]
             }
           },
-          coupon: true
-        }
-      });
-      
-      // Atualizar o contador de uso do cupom DENTRO da transação, se houver um cupom
-      if (couponId) {
-        await prismaTransaction.coupon.update({
-          where: { id: couponId },
-          data: { usageCount: { increment: 1 } },
-        });
-      }
-      
-      return transaction;
-    });
-    
-    // Buscar o estudante atualizado com a nova transação
-    const updatedStudent = await prisma.student.findUnique({
-      where: { id: existingStudent.id },
-      include: {
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        },
-        transactions: {
           include: {
             courses: {
               include: {
                 course: true,
                 courseModality: true
               }
+            },
+            coupon: true
+          }
+        });
+        
+        // Se temos um cupom válido, incrementamos o contador DENTRO da transação
+        // Isso garante atomicidade completa
+        if (cupomValidado) {
+          await prismaTransaction.coupon.update({
+            where: { id: cupomValidado.id },
+            data: { usageCount: { increment: 1 } },
+          });
+          console.log(`Contador de uso do cupom ${cupomValidado.id} incrementado com sucesso (dentro da transação).`);
+        }
+        
+        return newTransaction;
+      });
+      
+      // Buscar o estudante atualizado com a nova transação
+      const updatedStudent = await prisma.student.findUnique({
+        where: { id: existingStudent.id },
+        include: {
+          createdBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true
+            }
+          },
+          transactions: {
+            include: {
+              courses: {
+                include: {
+                  course: true,
+                  courseModality: true
+                }
+              }
             }
           }
         }
-      }
-    });
+      });
     
-    return res.status(200).json({
-      message: 'Novos cursos adicionados com sucesso',
-      student: updatedStudent,
-      transaction: result
-    });
-    
+      return res.status(200).json({
+        message: 'Novos cursos adicionados com sucesso',
+        student: updatedStudent,
+        transaction
+      });
+    } catch (transactionError) {
+      console.error('Erro na transação:', transactionError);
+      return handleError(transactionError, res);
+    }
   } catch (error) {
     console.error('Erro ao adicionar cursos a aluno existente:', error);
     return handleError(error, res);
@@ -706,7 +729,7 @@ export const updateStudent = async (req: Request, res: Response): Promise<Respon
     }
 
     // Verificar se o usuário está autenticado
-    const userId = req.user && req.user.userId;
+    const userId = req.user?.userId;
     
     if (!userId) {
       return res.status(401).json({
@@ -738,6 +761,21 @@ export const updateStudent = async (req: Request, res: Response): Promise<Respon
       });
     }
 
+    // Verificar restrições para vendedores
+    if (req.user?.role === 'SELLER' && 
+        studentData.transactions && studentData.transactions.length > 0) {
+      
+      for (const transaction of studentData.transactions) {
+        // Vendedor só pode alterar para status 'Cancelado'
+        if (transaction.paymentStatus && transaction.paymentStatus !== 'Pendente' && transaction.paymentStatus !== 'Cancelado') {
+          return res.status(403).json({
+            error: 'Permissão negada',
+            message: 'Vendedores só podem cancelar transações, não podem marcar como pagas'
+          });
+        }
+      }
+    }
+
     // Verificar se está adicionando novos cursos
     const addingNewCourses = studentData.courses && studentData.courses.length > 0;
     
@@ -748,194 +786,161 @@ export const updateStudent = async (req: Request, res: Response): Promise<Respon
         message: 'É necessário informar o valor total para novos cursos'
       });
     }
-
-    // Variáveis para processar cupom
-    let couponId = null;
-
-    // Processar cupom se fornecido
+    
+    // SOLUÇÃO 3: Buscar e validar cupom antes da transação, mas usá-lo dentro dela
+    let cupomValidado = null;
+    
     if (studentData.couponCode) {
       try {
         // Buscar cupom pelo código
         let coupon = await prisma.coupon.findUnique({
           where: { code: studentData.couponCode },
-          include: {
-            user: true,
-          },
         });
-
-        // Se não encontrou pelo código, tentar encontrar pelo nome personalizado
+        
+        // Se não encontrou pelo código, tentar pelo nome personalizado
         if (!coupon) {
-          console.log(`Cupom não encontrado pelo código "${studentData.couponCode}", tentando buscar por nome personalizado`);
-          
-          // Usar o Prisma para fazer uma busca case-insensitive
           const couponsWithCustomName = await prisma.coupon.findMany({
             where: { 
               customName: {
                 equals: studentData.couponCode,
-                mode: 'insensitive' // Busca case-insensitive
+                mode: 'insensitive'
               },
               active: true 
-            },
-            include: {
-              user: true,
-            },
+            }
           });
-
-          console.log(`Encontrados ${couponsWithCustomName.length} cupons com o nome personalizado "${studentData.couponCode}":`, 
-            couponsWithCustomName.map(c => ({ id: c.id, code: c.code, customName: c.customName })));
-
+          
           // Se encontrou exatamente um cupom com o nome personalizado, usar esse
           if (couponsWithCustomName.length === 1) {
-            console.log(`Usando cupom encontrado por nome personalizado: ${couponsWithCustomName[0].code}`);
             coupon = couponsWithCustomName[0];
           }
           // Se encontrou mais de um, usar o primeiro ativo
           else if (couponsWithCustomName.length > 1) {
             const activeCoupon = couponsWithCustomName.find(c => c.active);
             if (activeCoupon) {
-              console.log(`Encontrados múltiplos cupons, usando o primeiro ativo: ${activeCoupon.code}`);
               coupon = activeCoupon;
             }
           }
         }
-
+        
+        // Verificar se o cupom é válido
         if (!coupon) {
-          return res.status(404).json({
-            error: 'Cupom não encontrado',
-            message: 'O cupom informado não existe'
-          });
+          console.log('Cupom não encontrado. Continuando sem aplicar cupom.');
+        } 
+        else if (!coupon.active) {
+          console.log('Cupom inativo. Continuando sem aplicar cupom.');
         }
-
-        if (!coupon.active) {
-          return res.status(400).json({
-            error: 'Cupom inativo',
-            message: 'Este cupom não está ativo'
-          });
+        else if (coupon.expirationDate && new Date() > new Date(coupon.expirationDate)) {
+          console.log('Cupom expirado. Continuando sem aplicar cupom.');
         }
-
-        // Verificar se o cupom está expirado
-        if (coupon.expirationDate && new Date() > new Date(coupon.expirationDate)) {
-          return res.status(400).json({
-            error: 'Cupom expirado',
-            message: 'Este cupom já expirou'
-          });
+        else if (coupon.usageLimit !== null && coupon.usageCount >= coupon.usageLimit) {
+          console.log('Limite de uso excedido. Continuando sem aplicar cupom.');
         }
-
-        // Verificar se o cupom atingiu o limite de uso
-        if (coupon.usageLimit !== null && coupon.usageCount >= coupon.usageLimit) {
-          return res.status(400).json({
-            error: 'Limite de uso excedido',
-            message: 'Este cupom já atingiu seu limite máximo de uso'
-          });
+        else {
+          // Tudo certo, armazenamos o cupom validado para uso dentro da transação
+          cupomValidado = coupon;
         }
-
-        // Tudo certo, podemos usar o cupom
-        couponId = coupon.id;
-
-        console.log(`Cupom ${studentData.couponCode} aplicado com sucesso. ID: ${couponId}`);
-      } catch (couponError) {
-        console.error('Erro ao processar cupom:', couponError);
-        return res.status(500).json({
-          error: 'Erro ao processar cupom',
-          message: 'Não foi possível processar o cupom. Por favor, tente novamente.'
-        });
+      } catch (error) {
+        console.error('Erro ao buscar cupom:', error);
+        // Continuar sem cupom
       }
-    } else if (studentData.couponCode === '') {
-      // Remover cupom - não precisa fazer nada pois não há mais couponId no Student
-      couponId = null;
-    } else {
-      // Não temos mais cupom no Student, então simplesmente não fazemos nada
-      couponId = null;
     }
 
-    // Converter datas para o formato correto
-    let birthDate = existingStudent.birthDate;
-
-    if (studentData.birthDate !== undefined) {
-      birthDate = studentData.birthDate ? new Date(studentData.birthDate) : null;
-    }
-
-    // Usar uma transação para garantir consistência nas operações de atualização
-    const result = await prisma.$transaction(async (prismaTransaction) => {
-      // Atualiza o aluno
-      const updatedStudent = await prismaTransaction.student.update({
-        where: { id: Number.parseInt(id, 10) },
-        data: {
-          fullName: studentData.fullName,
-          ddd: studentData.ddd,
-          phone: studentData.phone,
-          email: studentData.email,
-          cpf: studentData.cpf,
-          cnhNumber: studentData.cnhNumber,
-          cnhType: studentData.cnhType,
-          renach: studentData.renach,
-          birthDate,
-        },
-        include: {
-          createdBy: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
+    // Usar uma transação para garantir atomicidade
+    try {
+      const result = await prisma.$transaction(async (prismaTransaction) => {
+        // Atualiza o aluno
+        const updatedStudent = await prismaTransaction.student.update({
+          where: { id: Number.parseInt(id, 10) },
+          data: {
+            fullName: studentData.fullName,
+            ddd: studentData.ddd,
+            phone: studentData.phone,
+            email: studentData.email,
+            cpf: studentData.cpf,
+            cnhNumber: studentData.cnhNumber,
+            cnhType: studentData.cnhType,
+            renach: studentData.renach,
+            birthDate: studentData.birthDate ? new Date(studentData.birthDate) : null,
           },
-          transactions: {
+          include: {
+            createdBy: {
+              select: {
+                id: true,
+                name: true,
+                email: true
+              }
+            },
+            transactions: {
+              include: {
+                courses: {
+                  include: {
+                    course: true,
+                    courseModality: true
+                  }
+                },
+                coupon: true
+              }
+            }
+          }
+        });
+
+        // Se estiver adicionando novos cursos, criar uma nova transação
+        let transaction = null;
+        if (addingNewCourses && studentData.courses && studentData.totalValue) {
+          // Criar a transação dentro da mesma transação do Prisma para garantir atomicidade
+          transaction = await prismaTransaction.transaction.create({
+            data: {
+              studentId: updatedStudent.id,
+              totalValue: studentData.totalValue,
+              paymentType: studentData.paymentType || 'PIX',
+              installments: studentData.installments || 1,
+              paymentStatus: studentData.paymentStatus || 'Pendente',
+              paymentDate: studentData.paymentDate,
+              paymentForecastDate: studentData.paymentForecastDate,
+              createdById: userId,
+              couponId: cupomValidado?.id || null, // Usar o cupom já validado
+              discountAmount: studentData.discountAmount,
+              // Criar os cursos associados à transação
+              courses: {
+                create: studentData.courses.map(course => ({
+                  courseId: Number(course.courseId),
+                  courseModalityId: Number(course.courseModalityId)
+                }))
+              }
+            },
             include: {
               courses: {
                 include: {
                   course: true,
                   courseModality: true
                 }
-              },
-              coupon: true
-            }
-          }
-        }
-      });
-
-      // Se estiver adicionando novos cursos, criar uma nova transação
-      let transaction = null;
-      if (addingNewCourses && studentData.courses && studentData.totalValue) {
-        // Criar a transação dentro da mesma transação do Prisma para garantir atomicidade
-        transaction = await prismaTransaction.transaction.create({
-          data: {
-            studentId: updatedStudent.id,
-            totalValue: studentData.totalValue,
-            paymentType: studentData.paymentType || 'PIX',
-            installments: studentData.installments || 1,
-            paymentStatus: studentData.paymentStatus || 'Pendente',
-            paymentDate: studentData.paymentDate,
-            paymentForecastDate: studentData.paymentForecastDate,
-            createdById: userId,
-            couponId: couponId,
-            discountAmount: studentData.discountAmount,
-            // Criar os cursos associados à transação
-            courses: {
-              create: studentData.courses.map(course => ({
-                courseId: Number(course.courseId),
-                courseModalityId: Number(course.courseModalityId)
-              }))
-            }
-          },
-          include: {
-            courses: {
-              include: {
-                course: true,
-                courseModality: true
               }
             }
+          });
+          
+          // Se temos um cupom válido, incrementamos o contador DENTRO da transação
+          // Isso garante atomicidade completa
+          if (cupomValidado) {
+            await prismaTransaction.coupon.update({
+              where: { id: cupomValidado.id },
+              data: { usageCount: { increment: 1 } },
+            });
+            console.log(`Contador de uso do cupom ${cupomValidado.id} incrementado com sucesso (dentro da transação).`);
           }
-        });
-      }
+        }
 
-      return { updatedStudent, transaction };
-    });
+        return { updatedStudent, transaction };
+      });
 
-    return res.status(200).json({
-      message: 'Estudante atualizado com sucesso',
-      student: result.updatedStudent,
-      transaction: result.transaction
-    });
+      return res.status(200).json({
+        message: 'Estudante atualizado com sucesso',
+        student: result.updatedStudent,
+        transaction: result.transaction
+      });
+    } catch (transactionError) {
+      console.error('Erro na transação:', transactionError);
+      return handleError(transactionError, res);
+    }
   } catch (error) {
     return handleError(error, res);
   }
@@ -1121,12 +1126,8 @@ async function getCouponId(couponCode: string): Promise<number | null> {
   }
 
   // Se encontrou o cupom e ele está ativo, retornar o ID
-  if (coupon && coupon.active) {
+  if (coupon?.active) {
     // NÃO incrementar o uso aqui
-    // await prisma.coupon.update({
-    //   where: { id: coupon.id },
-    //   data: { usageCount: { increment: 1 } },
-    // });
     return coupon.id;
   }
 
@@ -1190,7 +1191,7 @@ export const updateStudentBasicInfo = async (req: Request, res: Response): Promi
     }
 
     // Verificar se o usuário está autenticado
-    const userId = req.user && req.user.userId;
+    const userId = req.user?.userId;
     
     if (!userId) {
       return res.status(401).json({

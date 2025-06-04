@@ -77,6 +77,13 @@ export interface UpdateStudentInput {
     courseId: number;
     courseModalityId: number;
   }[];
+  // Transações para atualização de status
+  transactions?: {
+    id: number;
+    paymentStatus?: string;
+    paymentDate?: Date;
+    paymentForecastDate?: Date;
+  }[];
   // Campo valor total (opcional na atualização)
   totalValue?: number;
   // Demais campos

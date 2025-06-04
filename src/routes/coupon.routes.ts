@@ -31,6 +31,9 @@ router.patch('/status/:couponId', authenticate, requireProfile([Role.ADMIN]), co
 router.get('/affiliate/:userId', authenticate, couponController.getAffiliateCoupon);
 router.get('/affiliate/:userId/dashboard', authenticate, couponController.getAffiliateDashboardStats);
 
+// Rotas para vendedores
+router.get('/seller/:userId/dashboard', authenticate, couponController.getSellerDashboardStats);
+
 // Rotas para qualquer usuário (afiliado ou vendedor)
 router.get('/user/:userId', authenticate, couponController.getActiveUserCoupon);
 

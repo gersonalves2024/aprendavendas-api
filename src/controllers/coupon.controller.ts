@@ -1049,15 +1049,145 @@ export const getAffiliateDashboardStats = async (req: Request, res: Response): P
         }));
     }
 
+    // Retorna apenas as estatísticas, sem o campo "recentActivity" que não está na interface AffiliateDashboardStats
     return res.status(200).json({
-      stats,
-      coupon,
+      totalSales: stats.totalSales,
+      monthlySales: stats.monthlySales,
+      totalAmount: stats.totalAmount,
+      pendingAmount: stats.pendingAmount
     });
   } catch (error) {
     console.error('Erro ao buscar estatísticas do afiliado:', error);
     return res.status(500).json({
       error: 'Erro interno do servidor',
       message: 'Não foi possível buscar as estatísticas',
+    });
+  }
+};
+
+// Dashboard para vendedores com informações sobre vendas e comissões
+export const getSellerDashboardStats = async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const userId = Number.parseInt(req.params.userId, 10);
+
+    if (Number.isNaN(userId)) {
+      return res.status(400).json({
+        error: 'ID inválido',
+        message: 'O ID do usuário deve ser um número válido',
+      });
+    }
+
+    // Buscar usuário para confirmar que é vendedor
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: 'Usuário não encontrado',
+        message: 'O usuário especificado não existe',
+      });
+    }
+
+    if (user.role !== 'SELLER') {
+      return res.status(400).json({
+        error: 'Usuário não é vendedor',
+        message: 'Apenas usuários com papel de vendedor podem ter este dashboard',
+      });
+    }
+
+    // Buscar todas as transações do vendedor
+    const transactions = await prisma.transaction.findMany({
+      where: {
+        student: {
+          userId
+        }
+      },
+      include: {
+        student: {
+          select: {
+            id: true,
+            fullName: true,
+            registrationDate: true,
+          }
+        },
+        courses: {
+          include: {
+            course: true,
+            courseModality: true
+          }
+        }
+      },
+    });
+
+    // Buscar cupom ativo do vendedor
+    const coupon = await prisma.coupon.findFirst({
+      where: { 
+        userId,
+        active: true
+      },
+      include: {
+        transactions: {
+          include: {
+            student: {
+              select: {
+                id: true,
+                fullName: true,
+                registrationDate: true,
+              }
+            }
+          }
+        }
+      },
+    });
+
+    // Estatísticas iniciais
+    const stats = {
+      totalSales: 0,
+      monthlySales: 0,
+      totalAmount: 0,
+      pendingAmount: 0
+    };
+
+    // Calcular estatísticas
+    if (transactions && transactions.length > 0) {
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+      
+      // Filtrar apenas transações pagas
+      const paidTransactions = transactions.filter(transaction => transaction.paymentStatus === 'Pago');
+      
+      // Contabilizar apenas transações pagas
+      stats.totalSales = paidTransactions.length;
+      
+      // Vendas do mês atual (apenas pagas)
+      stats.monthlySales = paidTransactions.filter(transaction => {
+        const transactionDate = new Date(transaction.createdAt);
+        return transactionDate.getMonth() === currentMonth && transactionDate.getFullYear() === currentYear;
+      }).length;
+      
+      // Total das vendas (apenas pagas)
+      stats.totalAmount = paidTransactions.reduce((total, transaction) => total + transaction.totalValue, 0);
+      
+      // Comissões pendentes (se houver cupom)
+      if (coupon && coupon.transactions && coupon.transactions.length > 0) {
+        stats.pendingAmount = coupon.transactions.reduce((total, transaction) => {
+          // Se a transação tiver status 'Pago' ou 'Pendente', considerar na soma
+          if (transaction.paymentStatus === 'Pago' || transaction.paymentStatus === 'Pendente') {
+            return total + (transaction.discountAmount || 0);
+          }
+          return total;
+        }, 0);
+      }
+    }
+
+    return res.status(200).json(stats);
+  } catch (error) {
+    console.error('Erro ao buscar estatísticas do vendedor:', error);
+    return res.status(500).json({
+      error: 'Erro interno do servidor',
+      message: 'Não foi possível buscar as estatísticas do vendedor',
     });
   }
 }; 

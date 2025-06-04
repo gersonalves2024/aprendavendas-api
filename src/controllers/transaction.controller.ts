@@ -99,8 +99,12 @@ export const createTransaction = async (req: Request, res: Response): Promise<Re
     // Criar a transação
     // Garantir que a data de pagamento seja a data atual quando o status for Pago
     const currentDate = new Date();
+    
+    // Verificar o perfil do usuário e forçar status como "Pendente" se for vendedor
+    const paymentStatus = req.user.role === 'SELLER' ? 'Pendente' : transactionData.paymentStatus;
+    
     const paymentDate = 
-      transactionData.paymentStatus === 'Pago' 
+      paymentStatus === 'Pago' 
         ? currentDate 
         : (transactionData.paymentDate ? new Date(transactionData.paymentDate) : null);
     
@@ -110,7 +114,7 @@ export const createTransaction = async (req: Request, res: Response): Promise<Re
         totalValue: transactionData.totalValue,
         paymentType: transactionData.paymentType,
         installments: transactionData.installments,
-        paymentStatus: transactionData.paymentStatus,
+        paymentStatus: paymentStatus,
         paymentDate: paymentDate,
         paymentForecastDate: transactionData.paymentForecastDate ? new Date(transactionData.paymentForecastDate) : null,
         createdById: req.user.userId,
@@ -338,6 +342,14 @@ export const updateTransaction = async (req: Request, res: Response): Promise<Re
     // Verificar permissões (apenas admin e o criador podem atualizar)
     if (req.user.role !== 'ADMIN' && transaction.createdById !== req.user.userId) {
       throw new AppError('Você não tem permissão para atualizar esta transação', 403, undefined, 'PERMISSION_DENIED');
+    }
+    
+    // Restrições para vendedores
+    if (req.user.role === 'SELLER') {
+      // Vendedor só pode alterar para status 'Cancelado'
+      if (transactionData.paymentStatus && transactionData.paymentStatus !== 'Cancelado') {
+        throw new AppError('Vendedores só podem cancelar transações, não podem marcar como pagas', 403, 'paymentStatus', 'PERMISSION_DENIED');
+      }
     }
     
     // Não permite alterar cursos de uma transação com pagamento já realizado
